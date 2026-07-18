@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   StyleSheet,
   Text,
@@ -9,15 +9,16 @@ import {
   Image,
   SafeAreaView,
   ActivityIndicator,
-  FlatList,
   Modal,
   StatusBar,
   Dimensions,
-  Platform,
   Alert,
+  Animated,
+  Easing,
 } from 'react-native';
 import { Audio } from 'expo-av';
 import * as SecureStore from 'expo-secure-store';
+import * as FileSystem from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import {
@@ -30,20 +31,18 @@ import {
   Music,
   Search,
   UploadCloud,
-  ListMusic,
   LogOut,
   ChevronDown,
-  Check,
   Plus,
   Link,
   Lock,
   User as UserIcon,
   Globe,
+  Radio,
 } from 'lucide-react-native';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-// Interfaces
 export interface Song {
   id: string;
   title: string;
@@ -70,19 +69,52 @@ interface ImportItem {
   error?: string;
 }
 
+const SONGS_CACHE_DIR = FileSystem.documentDirectory + 'songs/';
+
+async function ensureCacheDir() {
+  const info = await FileSystem.getInfoAsync(SONGS_CACHE_DIR);
+  if (!info.exists) {
+    await FileSystem.makeDirectoryAsync(SONGS_CACHE_DIR, { intermediates: true });
+  }
+}
+
+async function getCachedAudioUri(songId: string, remoteUrl: string): Promise<string> {
+  try {
+    const localPath = SONGS_CACHE_DIR + songId + '.mp3';
+    const info = await FileSystem.getInfoAsync(localPath);
+    if (info.exists) {
+      return localPath;
+    }
+    return remoteUrl;
+  } catch {
+    return remoteUrl;
+  }
+}
+
+async function cacheAudioInBackground(songId: string, remoteUrl: string) {
+  try {
+    await ensureCacheDir();
+    const localPath = SONGS_CACHE_DIR + songId + '.mp3';
+    const info = await FileSystem.getInfoAsync(localPath);
+    if (!info.exists) {
+      await FileSystem.downloadAsync(remoteUrl, localPath);
+    }
+  } catch {
+    // Silent fail for background caching
+  }
+}
+
 export default function App() {
-  // Navigation State
-  const [currentScreen, setCurrentScreen] = useState<'login' | 'home' | 'playlists' | 'upload'>('login');
-  
-  // Auth States
-  const [serverUrl, setServerUrl] = useState('https://api.music.xisd.uz');
+  const [hasError, setHasError] = useState(false);
+  const [currentScreen, setCurrentScreen] = useState<'login' | 'home' | 'playlists' | 'upload' | 'radio'>('login');
+
+  const [serverUrl] = useState('https://api.music.xisd.uz');
   const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('');
   const [token, setToken] = useState<string | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-  // Music Player States
   const [songs, setSongs] = useState<Song[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [activePlaylist, setActivePlaylist] = useState<Playlist | null>(null);
@@ -90,7 +122,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [recentSongs, setRecentSongs] = useState<Song[]>([]);
   const [trendingSongs, setTrendingSongs] = useState<Song[]>([]);
-  
+
   const [currentSong, setCurrentSong] = useState<Song | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
@@ -100,32 +132,68 @@ export default function App() {
   const [isLoop, setIsLoop] = useState<'none' | 'one' | 'all'>('none');
   const [isPlayerModalVisible, setIsPlayerModalVisible] = useState(false);
 
-  // YouTube Importer States
+  const [isRadioMode, setIsRadioMode] = useState(false);
+  const [radioSongs, setRadioSongs] = useState<Song[]>([]);
+  const [isRadioLoading, setIsRadioLoading] = useState(false);
+  const vinylRotation = useRef(new Animated.Value(0)).current;
+  const vinylAnimRef = useRef<Animated.CompositeAnimation | null>(null);
+
   const [ytUrl, setYtUrl] = useState('');
   const [isImporting, setIsImporting] = useState(false);
   const [importQueue, setImportQueue] = useState<ImportItem[]>([]);
 
-  // Refs
   const soundRef = useRef<Audio.Sound | null>(null);
   const progressWidthRef = useRef<number>(0);
 
-  // Axios instance creator
-  const getApi = () => {
+  // Refs that mirror state so callbacks always read current values
+  const isLoopRef = useRef(isLoop);
+  const queueRef = useRef(queue);
+  const currentSongRef = useRef(currentSong);
+  const isShuffleRef = useRef(isShuffle);
+  const isRadioModeRef = useRef(isRadioMode);
+
+  useEffect(() => { isLoopRef.current = isLoop; }, [isLoop]);
+  useEffect(() => { queueRef.current = queue; }, [queue]);
+  useEffect(() => { currentSongRef.current = currentSong; }, [currentSong]);
+  useEffect(() => { isShuffleRef.current = isShuffle; }, [isShuffle]);
+  useEffect(() => { isRadioModeRef.current = isRadioMode; }, [isRadioMode]);
+
+  // Vinyl spin animation
+  useEffect(() => {
+    if (isPlaying && isRadioMode) {
+      vinylRotation.setValue(0);
+      const anim = Animated.loop(
+        Animated.timing(vinylRotation, {
+          toValue: 1,
+          duration: 4000,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        })
+      );
+      vinylAnimRef.current = anim;
+      anim.start();
+    } else {
+      vinylAnimRef.current?.stop();
+    }
+  }, [isPlaying, isRadioMode]);
+
+  const vinylSpin = vinylRotation.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+
+  const getApi = useCallback(() => {
     return axios.create({
       baseURL: serverUrl,
       headers: {
         Authorization: token ? `Bearer ${token}` : '',
       },
     });
-  };
+  }, [serverUrl, token]);
 
-  // Initialize Auth
   useEffect(() => {
     const restoreSession = async () => {
       try {
-        const savedServer = await AsyncStorage.getItem('symphony_server_url');
-        if (savedServer) setServerUrl(savedServer);
-
         const savedToken = await SecureStore.getItemAsync('symphony_jwt_token');
         if (savedToken) {
           setToken(savedToken);
@@ -137,11 +205,9 @@ export default function App() {
         setIsInitializing(false);
       }
     };
-
     restoreSession();
   }, []);
 
-  // Configure Audio Mode for Background Playback
   useEffect(() => {
     const setupAudio = async () => {
       try {
@@ -158,8 +224,7 @@ export default function App() {
     setupAudio();
   }, []);
 
-  // Fetch Music Library Data
-  const fetchLibrary = async () => {
+  const fetchLibrary = useCallback(async () => {
     if (!token) return;
     try {
       const api = getApi();
@@ -176,16 +241,14 @@ export default function App() {
     } catch (err) {
       console.error('Failed to fetch library:', err);
     }
-  };
+  }, [token, getApi]);
 
-  // Trigger library fetch on screen change
   useEffect(() => {
     if (token && currentScreen !== 'login') {
       fetchLibrary();
     }
-  }, [currentScreen, token]);
+  }, [currentScreen, token, fetchLibrary]);
 
-  // Poll YouTube background downloads when on the upload screen
   useEffect(() => {
     if (currentScreen !== 'upload' || !token) return;
 
@@ -193,15 +256,26 @@ export default function App() {
       try {
         const res = await getApi().get('/songs/import-status');
         setImportQueue(res.data);
-      } catch (err) {}
+      } catch {}
     };
 
     fetchImports();
     const interval = setInterval(fetchImports, 3000);
     return () => clearInterval(interval);
-  }, [currentScreen, token]);
+  }, [currentScreen, token, getApi]);
 
-  // Login handler
+  // Fetch radio songs when navigating to radio tab
+  useEffect(() => {
+    if (currentScreen !== 'radio' || !token) return;
+    const fetchRadioSongs = async () => {
+      try {
+        const res = await getApi().get('/songs');
+        setRadioSongs(res.data);
+      } catch {}
+    };
+    fetchRadioSongs();
+  }, [currentScreen, token, getApi]);
+
   const handleLogin = async () => {
     if (!username || !password || !serverUrl) {
       Alert.alert('Error', 'Please fill in all fields');
@@ -214,10 +288,10 @@ export default function App() {
         password,
       });
       const jwtToken = res.data.access_token;
-      
+
       await SecureStore.setItemAsync('symphony_jwt_token', jwtToken);
       await AsyncStorage.setItem('symphony_server_url', serverUrl);
-      
+
       setToken(jwtToken);
       setCurrentScreen('home');
     } catch (err: any) {
@@ -228,34 +302,89 @@ export default function App() {
     }
   };
 
-  // Logout handler
   const handleLogout = async () => {
     try {
       await SecureStore.deleteItemAsync('symphony_jwt_token');
       setToken(null);
       setCurrentSong(null);
       setIsPlaying(false);
+      setIsRadioMode(false);
       if (soundRef.current) {
         await soundRef.current.unloadAsync();
         soundRef.current = null;
       }
       setCurrentScreen('login');
-    } catch (err) {}
+    } catch {}
   };
 
-  // Playback Control Handlers
-  const playSong = async (song: Song, contextQueue: Song[] = []) => {
+  const handleSongEndedFromCallback = useCallback(() => {
+    const loop = isLoopRef.current;
+    const q = queueRef.current;
+    const song = currentSongRef.current;
+    const shuffle = isShuffleRef.current;
+    const radioMode = isRadioModeRef.current;
+
+    if (loop === 'one') {
+      soundRef.current?.setStatusAsync({ positionMillis: 0, shouldPlay: true });
+      return;
+    }
+
+    if (q.length === 0 || !song) return;
+
+    let nextSong: Song | null = null;
+
+    if (radioMode || shuffle) {
+      if (q.length > 1) {
+        let rand = Math.floor(Math.random() * q.length);
+        while (q[rand].id === song.id) {
+          rand = Math.floor(Math.random() * q.length);
+        }
+        nextSong = q[rand];
+      } else {
+        nextSong = q[0];
+      }
+    } else {
+      const idx = q.findIndex((s) => s.id === song.id);
+      if (idx !== -1 && idx < q.length - 1) {
+        nextSong = q[idx + 1];
+      } else if (loop === 'all') {
+        nextSong = q[0];
+      }
+    }
+
+    if (nextSong) {
+      playSongInternal(nextSong, q);
+    }
+  }, []);
+
+  const onPlaybackStatusUpdate = useCallback((status: any) => {
+    if (!status.isLoaded) return;
+
+    setCurrentTime(status.positionMillis / 1000);
+    if (status.durationMillis) {
+      setDuration(status.durationMillis / 1000);
+    }
+
+    setIsPlaying(status.isPlaying);
+
+    if (status.didJustFinish) {
+      handleSongEndedFromCallback();
+    }
+  }, [handleSongEndedFromCallback]);
+
+  const playSongInternal = async (song: Song, contextQueue: Song[]) => {
     try {
       if (soundRef.current) {
         await soundRef.current.unloadAsync();
         soundRef.current = null;
       }
 
-      // Track play count on server
       getApi().post(`/songs/${song.id}/play`).catch(() => {});
       getApi().post(`/songs/${song.id}/history`).catch(() => {});
 
-      const audioUri = `${serverUrl}${song.audioUrl}`;
+      const remoteUri = `${serverUrl}${song.audioUrl}`;
+      const audioUri = await getCachedAudioUri(song.id, remoteUri);
+
       const { sound } = await Audio.Sound.createAsync(
         { uri: audioUri },
         { shouldPlay: true },
@@ -267,38 +396,33 @@ export default function App() {
       setIsPlaying(true);
       setDuration(song.duration);
 
-      // Setup queue context
       if (contextQueue.length > 0) {
         setQueue(contextQueue);
-      } else if (!queue.some((s) => s.id === song.id)) {
-        setQueue([song, ...queue]);
       }
-    } catch (err) {
+
+      // Background cache if playing from remote
+      if (audioUri === remoteUri) {
+        cacheAudioInBackground(song.id, remoteUri);
+      }
+    } catch {
       Alert.alert('Error', 'Could not play audio stream.');
       setIsPlaying(false);
     }
   };
 
-  const onPlaybackStatusUpdate = (status: any) => {
-    if (!status.isLoaded) return;
-
-    setCurrentTime(status.positionMillis / 1000);
-    if (status.durationMillis) {
-      setDuration(status.durationMillis / 1000);
-    }
-
-    setIsPlaying(status.isPlaying);
-
-    if (status.didJustFinish) {
-      handleSongEnded();
-    }
-  };
-
-  const handleSongEnded = () => {
-    if (isLoop === 'one') {
-      soundRef.current?.setStatusAsync({ positionMillis: 0, shouldPlay: true });
+  const playSong = async (song: Song, contextQueue: Song[] = []) => {
+    setIsRadioMode(false);
+    if (contextQueue.length > 0) {
+      await playSongInternal(song, contextQueue);
     } else {
-      playNext();
+      const q = queueRef.current;
+      if (!q.some((s) => s.id === song.id)) {
+        const newQueue = [song, ...q];
+        setQueue(newQueue);
+        await playSongInternal(song, newQueue);
+      } else {
+        await playSongInternal(song, q);
+      }
     }
   };
 
@@ -332,7 +456,7 @@ export default function App() {
       }
     }
 
-    if (nextSong) playSong(nextSong, queue);
+    if (nextSong) playSongInternal(nextSong, queue);
   };
 
   const playPrevious = async () => {
@@ -351,7 +475,7 @@ export default function App() {
       prevSong = queue[queue.length - 1];
     }
 
-    if (prevSong) playSong(prevSong, queue);
+    if (prevSong) playSongInternal(prevSong, queue);
   };
 
   const handleSeek = async (event: any) => {
@@ -362,7 +486,19 @@ export default function App() {
     await soundRef.current.setStatusAsync({ positionMillis: seekTime * 1000 });
   };
 
-  // YouTube Importer Submission
+  const startRadio = async () => {
+    if (radioSongs.length === 0) return;
+    setIsRadioLoading(true);
+    try {
+      const shuffled = [...radioSongs].sort(() => Math.random() - 0.5);
+      setIsRadioMode(true);
+      setQueue(shuffled);
+      await playSongInternal(shuffled[0], shuffled);
+    } finally {
+      setIsRadioLoading(false);
+    }
+  };
+
   const handleYoutubeImport = async () => {
     if (!ytUrl.trim()) return;
     setIsImporting(true);
@@ -376,7 +512,6 @@ export default function App() {
       } else {
         Alert.alert('Queued', 'Added to background download queue.');
       }
-      // Force refresh status
       const statusRes = await getApi().get('/songs/import-status');
       setImportQueue(statusRes.data);
     } catch (err: any) {
@@ -387,20 +522,17 @@ export default function App() {
     }
   };
 
-  // Open specific Playlist Screen
   const openPlaylist = async (playlist: Playlist) => {
     setActivePlaylist(playlist);
     try {
       const res = await getApi().get(`/playlists/${playlist.id}`);
-      // Playlist detail endpoint returns playlist with its songs array
       setPlaylistSongs(res.data.playlistSongs.map((ps: any) => ps.song));
       setCurrentScreen('playlists');
-    } catch (err) {
+    } catch {
       Alert.alert('Error', 'Failed to fetch playlist tracks.');
     }
   };
 
-  // Format seconds to MM:SS
   const formatTime = (secs: number) => {
     if (isNaN(secs)) return '0:00';
     const m = Math.floor(secs / 60);
@@ -408,14 +540,30 @@ export default function App() {
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
-  // Filter Search Results
   const filteredSongs = songs.filter(
     (s) =>
       s.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       s.artist.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  // Initializing Loader Screen
+  // Error boundary fallback
+  if (hasError) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Text style={{ color: '#fff', fontSize: 18, marginBottom: 16 }}>Something went wrong</Text>
+        <TouchableOpacity
+          style={styles.loginButton}
+          onPress={() => {
+            setHasError(false);
+            setCurrentScreen('home');
+          }}
+        >
+          <Text style={styles.loginButtonText}>Reload</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   if (isInitializing) {
     return (
       <View style={styles.loadingContainer}>
@@ -424,7 +572,6 @@ export default function App() {
     );
   }
 
-  // Login Screen
   if (currentScreen === 'login') {
     return (
       <SafeAreaView style={styles.loginContainer}>
@@ -443,7 +590,7 @@ export default function App() {
                 <Globe size={18} color="#71717a" style={styles.inputIcon} />
                 <TextInput
                   value={serverUrl}
-                  onChangeText={setServerUrl}
+                  editable={false}
                   placeholder="https://api.music.xisd.uz"
                   placeholderTextColor="#52525b"
                   style={styles.textInput}
@@ -496,51 +643,164 @@ export default function App() {
     );
   }
 
-  return (
-    <SafeAreaView style={styles.mainContainer}>
-      <StatusBar barStyle="light-content" />
+  try {
+    return (
+      <SafeAreaView style={styles.mainContainer}>
+        <StatusBar barStyle="light-content" />
 
-      {/* Screen Headers */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>
-          {currentScreen === 'home' && 'Symphony'}
-          {currentScreen === 'playlists' && (activePlaylist ? activePlaylist.name : 'Playlists')}
-          {currentScreen === 'upload' && 'Add Music'}
-        </Text>
-        <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
-          <LogOut size={16} color="#ef4444" />
-        </TouchableOpacity>
-      </View>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>
+            {currentScreen === 'home' && 'Symphony'}
+            {currentScreen === 'playlists' && (activePlaylist ? activePlaylist.name : 'Playlists')}
+            {currentScreen === 'upload' && 'Add Music'}
+            {currentScreen === 'radio' && 'Radio'}
+          </Text>
+          <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
+            <LogOut size={16} color="#ef4444" />
+          </TouchableOpacity>
+        </View>
 
-      {/* SCREEN ROUTING */}
-      <View style={{ flex: 1 }}>
-        {/* HOME SCREEN */}
-        {currentScreen === 'home' && (
-          <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-            {/* Search Box */}
-            <View style={styles.searchContainer}>
-              <Search size={18} color="#71717a" style={styles.searchIcon} />
-              <TextInput
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-                placeholder="Search songs, artists..."
-                placeholderTextColor="#71717a"
-                style={styles.searchInput}
-              />
-            </View>
+        <View style={{ flex: 1 }}>
+          {/* HOME SCREEN */}
+          {currentScreen === 'home' && (
+            <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+              <View style={styles.searchContainer}>
+                <Search size={18} color="#71717a" style={styles.searchIcon} />
+                <TextInput
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                  placeholder="Search songs, artists..."
+                  placeholderTextColor="#71717a"
+                  style={styles.searchInput}
+                />
+              </View>
 
-            {searchQuery ? (
-              // Search Results List
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Search Results</Text>
-                {filteredSongs.length === 0 ? (
-                  <Text style={styles.emptyText}>No songs found</Text>
+              {searchQuery ? (
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>Search Results</Text>
+                  {filteredSongs.length === 0 ? (
+                    <Text style={styles.emptyText}>No songs found</Text>
+                  ) : (
+                    filteredSongs.map((song) => (
+                      <TouchableOpacity
+                        key={song.id}
+                        style={styles.songRow}
+                        onPress={() => playSong(song, filteredSongs)}
+                      >
+                        <Image
+                          source={{ uri: song.coverUrl ? `${serverUrl}${song.coverUrl}` : 'https://placehold.co/100' }}
+                          style={styles.songRowImage as any}
+                        />
+                        <View style={styles.songRowDetails}>
+                          <Text style={[styles.songRowTitle, currentSong?.id === song.id && { color: '#22c55e' }]}>
+                            {song.title}
+                          </Text>
+                          <Text style={styles.songRowArtist}>{song.artist}</Text>
+                        </View>
+                        <Play size={16} color="#71717a" />
+                      </TouchableOpacity>
+                    ))
+                  )}
+                </View>
+              ) : (
+                <>
+                  {playlists.length > 0 && (
+                    <View style={styles.section}>
+                      <Text style={styles.sectionTitle}>Playlists</Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
+                        {playlists.map((playlist) => (
+                          <TouchableOpacity
+                            key={playlist.id}
+                            style={styles.playlistCard}
+                            onPress={() => openPlaylist(playlist)}
+                          >
+                            <Image
+                              source={{
+                                uri: playlist.coverUrl ? `${serverUrl}${playlist.coverUrl}` : 'https://placehold.co/200',
+                              }}
+                              style={styles.playlistImage as any}
+                            />
+                            <Text style={styles.playlistTitle} numberOfLines={1}>
+                              {playlist.name}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </View>
+                  )}
+
+                  {recentSongs.length > 0 && (
+                    <View style={styles.section}>
+                      <Text style={styles.sectionTitle}>Recently Uploaded</Text>
+                      {recentSongs.map((song) => (
+                        <TouchableOpacity
+                          key={song.id}
+                          style={styles.songRow}
+                          onPress={() => playSong(song, recentSongs)}
+                        >
+                          <Image
+                            source={{ uri: song.coverUrl ? `${serverUrl}${song.coverUrl}` : 'https://placehold.co/100' }}
+                            style={styles.songRowImage as any}
+                          />
+                          <View style={styles.songRowDetails}>
+                            <Text style={[styles.songRowTitle, currentSong?.id === song.id && { color: '#22c55e' }]}>
+                              {song.title}
+                            </Text>
+                            <Text style={styles.songRowArtist}>{song.artist}</Text>
+                          </View>
+                          <Play size={16} color="#71717a" />
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  )}
+
+                  {trendingSongs.length > 0 && (
+                    <View style={styles.section}>
+                      <Text style={styles.sectionTitle}>Most Played</Text>
+                      <View style={styles.gridContainer}>
+                        {trendingSongs.map((song) => (
+                          <TouchableOpacity
+                            key={song.id}
+                            style={styles.gridCard}
+                            onPress={() => playSong(song, trendingSongs)}
+                          >
+                            <Image
+                              source={{ uri: song.coverUrl ? `${serverUrl}${song.coverUrl}` : 'https://placehold.co/150' }}
+                              style={styles.gridImage as any}
+                            />
+                            <Text style={[styles.gridTitle, currentSong?.id === song.id && { color: '#22c55e' }]} numberOfLines={1}>
+                              {song.title}
+                            </Text>
+                            <Text style={styles.gridArtist} numberOfLines={1}>
+                              {song.artist}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </View>
+                  )}
+                </>
+              )}
+            </ScrollView>
+          )}
+
+          {/* PLAYLIST TRACKS SCREEN */}
+          {currentScreen === 'playlists' && (
+            <View style={{ flex: 1 }}>
+              <TouchableOpacity onPress={() => setCurrentScreen('home')} style={styles.backButton}>
+                <ChevronDown size={18} color="#22c55e" style={{ transform: [{ rotate: '90deg' }] }} />
+                <Text style={styles.backButtonText}>Back to Dashboard</Text>
+              </TouchableOpacity>
+
+              <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+                {playlistSongs.length === 0 ? (
+                  <Text style={styles.emptyText}>No tracks in this playlist</Text>
                 ) : (
-                  filteredSongs.map((song) => (
+                  playlistSongs.map((song) => (
                     <TouchableOpacity
                       key={song.id}
                       style={styles.songRow}
-                      onPress={() => playSong(song, filteredSongs)}
+                      onPress={() => playSong(song, playlistSongs)}
                     >
                       <Image
                         source={{ uri: song.coverUrl ? `${serverUrl}${song.coverUrl}` : 'https://placehold.co/100' }}
@@ -556,350 +816,353 @@ export default function App() {
                     </TouchableOpacity>
                   ))
                 )}
-              </View>
-            ) : (
-              <>
-                {/* Playlists Horizontal Slider */}
-                {playlists.length > 0 && (
-                  <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Playlists</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
-                      {playlists.map((playlist) => (
-                        <TouchableOpacity
-                          key={playlist.id}
-                          style={styles.playlistCard}
-                          onPress={() => openPlaylist(playlist)}
-                        >
-                          <Image
-                            source={{
-                              uri: playlist.coverUrl ? `${serverUrl}${playlist.coverUrl}` : 'https://placehold.co/200',
-                            }}
-                            style={styles.playlistImage as any}
-                          />
-                          <Text style={styles.playlistTitle} numberOfLines={1}>
-                            {playlist.name}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </ScrollView>
-                  </View>
-                )}
+              </ScrollView>
+            </View>
+          )}
 
-                {/* Recently Added Section */}
-                {recentSongs.length > 0 && (
-                  <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Recently Uploaded</Text>
-                    {recentSongs.map((song) => (
-                      <TouchableOpacity
-                        key={song.id}
-                        style={styles.songRow}
-                        onPress={() => playSong(song, recentSongs)}
-                      >
-                        <Image
-                          source={{ uri: song.coverUrl ? `${serverUrl}${song.coverUrl}` : 'https://placehold.co/100' }}
-                          style={styles.songRowImage as any}
-                        />
-                        <View style={styles.songRowDetails}>
-                          <Text style={[styles.songRowTitle, currentSong?.id === song.id && { color: '#22c55e' }]}>
-                            {song.title}
-                          </Text>
-                          <Text style={styles.songRowArtist}>{song.artist}</Text>
-                        </View>
-                        <Play size={16} color="#71717a" />
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                )}
-
-                {/* Trending Section */}
-                {trendingSongs.length > 0 && (
-                  <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Most Played</Text>
-                    <View style={styles.gridContainer}>
-                      {trendingSongs.map((song) => (
-                        <TouchableOpacity
-                          key={song.id}
-                          style={styles.gridCard}
-                          onPress={() => playSong(song, trendingSongs)}
-                        >
-                          <Image
-                            source={{ uri: song.coverUrl ? `${serverUrl}${song.coverUrl}` : 'https://placehold.co/150' }}
-                            style={styles.gridImage as any}
-                          />
-                          <Text style={[styles.gridTitle, currentSong?.id === song.id && { color: '#22c55e' }]} numberOfLines={1}>
-                            {song.title}
-                          </Text>
-                          <Text style={styles.gridArtist} numberOfLines={1}>
-                            {song.artist}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </View>
-                )}
-              </>
-            )}
-          </ScrollView>
-        )}
-
-        {/* PLAYLIST TRACKS SCREEN */}
-        {currentScreen === 'playlists' && (
-          <View style={{ flex: 1 }}>
-            <TouchableOpacity onPress={() => setCurrentScreen('home')} style={styles.backButton}>
-              <ChevronDown size={18} color="#22c55e" style={{ transform: [{ rotate: '90deg' }] }} />
-              <Text style={styles.backButtonText}>Back to Dashboard</Text>
-            </TouchableOpacity>
-
-            <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-              {playlistSongs.length === 0 ? (
-                <Text style={styles.emptyText}>No tracks in this playlist</Text>
-              ) : (
-                playlistSongs.map((song) => (
-                  <TouchableOpacity
-                    key={song.id}
-                    style={styles.songRow}
-                    onPress={() => playSong(song, playlistSongs)}
-                  >
+          {/* RADIO SCREEN */}
+          {currentScreen === 'radio' && (
+            <ScrollView contentContainerStyle={[styles.scrollContent, { alignItems: 'center', paddingTop: 40 }]} showsVerticalScrollIndicator={false}>
+              {isRadioMode && currentSong ? (
+                <View style={{ alignItems: 'center', width: '100%' }}>
+                  <Animated.View style={{
+                    width: 220,
+                    height: 220,
+                    borderRadius: 110,
+                    borderWidth: 6,
+                    borderColor: '#22c55e',
+                    overflow: 'hidden',
+                    marginBottom: 32,
+                    transform: [{ rotate: vinylSpin }],
+                  }}>
                     <Image
-                      source={{ uri: song.coverUrl ? `${serverUrl}${song.coverUrl}` : 'https://placehold.co/100' }}
-                      style={styles.songRowImage as any}
+                      source={{ uri: currentSong.coverUrl ? `${serverUrl}${currentSong.coverUrl}` : 'https://placehold.co/400' }}
+                      style={{ width: '100%', height: '100%' }}
                     />
-                    <View style={styles.songRowDetails}>
-                      <Text style={[styles.songRowTitle, currentSong?.id === song.id && { color: '#22c55e' }]}>
-                        {song.title}
-                      </Text>
-                      <Text style={styles.songRowArtist}>{song.artist}</Text>
+                    <View style={{
+                      position: 'absolute',
+                      top: 0, left: 0, right: 0, bottom: 0,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}>
+                      <View style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: 16,
+                        backgroundColor: '#09090b',
+                        borderWidth: 2,
+                        borderColor: '#27272a',
+                      }} />
                     </View>
-                    <Play size={16} color="#71717a" />
+                  </Animated.View>
+
+                  <Text style={styles.fullPlayerTitle} numberOfLines={1}>{currentSong.title}</Text>
+                  <Text style={[styles.fullPlayerArtist, { marginTop: 6, marginBottom: 24 }]} numberOfLines={1}>{currentSong.artist}</Text>
+
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 20 }}>
+                    <TouchableOpacity onPress={togglePlay} style={styles.fullPlayButton}>
+                      {isPlaying ? (
+                        <Pause size={28} color="#000" fill="#000" />
+                      ) : (
+                        <Play size={28} color="#000" fill="#000" style={{ marginLeft: 4 }} />
+                      )}
+                    </TouchableOpacity>
+                  </View>
+
+                  <Text style={{ color: '#71717a', fontSize: 12, marginTop: 24, fontWeight: '600' }}>
+                    RADIO MODE • {queue.length} songs in queue
+                  </Text>
+                </View>
+              ) : (
+                <View style={{ alignItems: 'center', paddingTop: 60 }}>
+                  <View style={{
+                    width: 120,
+                    height: 120,
+                    borderRadius: 60,
+                    backgroundColor: '#18181b',
+                    borderWidth: 2,
+                    borderColor: '#27272a',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginBottom: 32,
+                  }}>
+                    <Radio size={48} color="#22c55e" />
+                  </View>
+
+                  <Text style={{ color: '#fff', fontSize: 20, fontWeight: '900', marginBottom: 8 }}>
+                    Symphony Radio
+                  </Text>
+                  <Text style={{ color: '#71717a', fontSize: 13, textAlign: 'center', paddingHorizontal: 40, marginBottom: 32 }}>
+                    Shuffle through your entire library. Sit back and enjoy the mix.
+                  </Text>
+
+                  <TouchableOpacity
+                    style={[styles.loginButton, { width: 200 }]}
+                    onPress={startRadio}
+                    disabled={isRadioLoading || radioSongs.length === 0}
+                  >
+                    {isRadioLoading ? (
+                      <ActivityIndicator color="#000" />
+                    ) : (
+                      <Text style={styles.loginButtonText}>
+                        {radioSongs.length === 0 ? 'No Songs' : 'Start Radio'}
+                      </Text>
+                    )}
                   </TouchableOpacity>
-                ))
+
+                  {radioSongs.length > 0 && (
+                    <Text style={{ color: '#52525b', fontSize: 11, marginTop: 12 }}>
+                      {radioSongs.length} songs available
+                    </Text>
+                  )}
+                </View>
               )}
             </ScrollView>
-          </View>
-        )}
+          )}
 
-        {/* UPLOAD & YOUTUBE IMPORT SCREEN */}
-        {currentScreen === 'upload' && (
-          <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-            <View style={styles.importerCard}>
-              <View style={styles.importerHeader}>
-                <Link size={20} color="#22c55e" />
-                <Text style={styles.importerTitle}>YouTube Link Importer</Text>
-              </View>
-              <Text style={styles.importerDescription}>
-                Paste any YouTube video or playlist URL. The server will download and convert it to MP3 in the background.
-              </Text>
-              
-              <View style={styles.importerForm}>
-                <TextInput
-                  value={ytUrl}
-                  onChangeText={setYtUrl}
-                  placeholder="https://www.youtube.com/watch?v=..."
-                  placeholderTextColor="#52525b"
-                  style={styles.importerInput}
-                  autoCapitalize="none"
-                />
-                <TouchableOpacity
-                  style={styles.importerButton}
-                  onPress={handleYoutubeImport}
-                  disabled={isImporting || !ytUrl.trim()}
-                >
-                  {isImporting ? (
-                    <ActivityIndicator color="#000" size="small" />
-                  ) : (
-                    <Text style={styles.importerButtonText}>Import</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            </View>
+          {/* UPLOAD & YOUTUBE IMPORT SCREEN */}
+          {currentScreen === 'upload' && (
+            <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+              <View style={styles.importerCard}>
+                <View style={styles.importerHeader}>
+                  <Link size={20} color="#22c55e" />
+                  <Text style={styles.importerTitle}>YouTube Link Importer</Text>
+                </View>
+                <Text style={styles.importerDescription}>
+                  Paste any YouTube video or playlist URL. The server will download and convert it to MP3 in the background.
+                </Text>
 
-            {/* Background Downloads Queue */}
-            {importQueue.length > 0 && (
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Import Progress Queue</Text>
-                {importQueue.map((item, idx) => (
-                  <View key={`${item.id}-${idx}`} style={styles.queueItem}>
-                    <View style={{ flex: 1, marginRight: 8 }}>
-                      <Text style={styles.queueItemTitle} numberOfLines={1}>
-                        {item.title}
-                      </Text>
-                      <Text style={styles.queueItemUrl} numberOfLines={1}>
-                        {item.url}
-                      </Text>
+                <View style={styles.importerForm}>
+                  <TextInput
+                    value={ytUrl}
+                    onChangeText={setYtUrl}
+                    placeholder="https://www.youtube.com/watch?v=..."
+                    placeholderTextColor="#52525b"
+                    style={styles.importerInput}
+                    autoCapitalize="none"
+                  />
+                  <TouchableOpacity
+                    style={styles.importerButton}
+                    onPress={handleYoutubeImport}
+                    disabled={isImporting || !ytUrl.trim()}
+                  >
+                    {isImporting ? (
+                      <ActivityIndicator color="#000" size="small" />
+                    ) : (
+                      <Text style={styles.importerButtonText}>Import</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {importQueue.length > 0 && (
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>Import Progress Queue</Text>
+                  {importQueue.map((item, idx) => (
+                    <View key={`${item.id}-${idx}`} style={styles.queueItem}>
+                      <View style={{ flex: 1, marginRight: 8 }}>
+                        <Text style={styles.queueItemTitle} numberOfLines={1}>
+                          {item.title}
+                        </Text>
+                        <Text style={styles.queueItemUrl} numberOfLines={1}>
+                          {item.url}
+                        </Text>
+                      </View>
+                      <View style={styles.queueStatusContainer}>
+                        {item.status === 'pending' && (
+                          <Text style={[styles.queueStatusText, { color: '#71717a' }]}>Queued...</Text>
+                        )}
+                        {item.status === 'importing' && (
+                          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <ActivityIndicator size="small" color="#22c55e" style={{ marginRight: 4 }} />
+                            <Text style={[styles.queueStatusText, { color: '#22c55e' }]}>Importing...</Text>
+                          </View>
+                        )}
+                        {item.status === 'completed' && (
+                          <Text style={[styles.queueStatusText, { color: '#22c55e' }]}>Ready</Text>
+                        )}
+                        {item.status === 'failed' && (
+                          <Text style={[styles.queueStatusText, { color: '#ef4444' }]}>Failed</Text>
+                        )}
+                      </View>
                     </View>
-                    <View style={styles.queueStatusContainer}>
-                      {item.status === 'pending' && (
-                        <Text style={[styles.queueStatusText, { color: '#71717a' }]}>Queued...</Text>
-                      )}
-                      {item.status === 'importing' && (
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                          <ActivityIndicator size="small" color="#22c55e" style={{ marginRight: 4 }} />
-                          <Text style={[styles.queueStatusText, { color: '#22c55e' }]}>Importing...</Text>
-                        </View>
-                      )}
-                      {item.status === 'completed' && (
-                        <Text style={[styles.queueStatusText, { color: '#22c55e' }]}>Ready</Text>
-                      )}
-                      {item.status === 'failed' && (
-                        <Text style={[styles.queueStatusText, { color: '#ef4444' }]}>Failed</Text>
-                      )}
-                    </View>
-                  </View>
-                ))}
-              </View>
-            )}
-          </ScrollView>
-        )}
-      </View>
+                  ))}
+                </View>
+              )}
+            </ScrollView>
+          )}
+        </View>
 
-      {/* BOTTOM PERSISTENT MINI-PLAYER CAPSULE */}
-      {currentSong && (
-        <TouchableOpacity style={styles.miniPlayer} onPress={() => setIsPlayerModalVisible(true)}>
-          <Image
-            source={{ uri: currentSong.coverUrl ? `${serverUrl}${currentSong.coverUrl}` : 'https://placehold.co/100' }}
-            style={styles.miniPlayerImage as any}
-          />
-          <View style={styles.miniPlayerDetails}>
-            <Text style={styles.miniPlayerTitle} numberOfLines={1}>
-              {currentSong.title}
-            </Text>
-            <Text style={styles.miniPlayerArtist} numberOfLines={1}>
-              {currentSong.artist}
-            </Text>
-          </View>
-          <TouchableOpacity onPress={togglePlay} style={styles.miniPlayerPlayButton}>
-            {isPlaying ? (
-              <Pause size={18} color="#000" fill="#000" />
-            ) : (
-              <Play size={18} color="#000" fill="#000" style={{ marginLeft: 2 }} />
-            )}
-          </TouchableOpacity>
-        </TouchableOpacity>
-      )}
-
-      {/* FOOTER TAB NAV BAR */}
-      <View style={styles.tabBar}>
-        <TouchableOpacity
-          onPress={() => {
-            setCurrentScreen('home');
-            setActivePlaylist(null);
-          }}
-          style={styles.tabItem}
-        >
-          <Music size={20} color={currentScreen === 'home' ? '#22c55e' : '#71717a'} />
-          <Text style={[styles.tabLabel, currentScreen === 'home' && { color: '#22c55e' }]}>Home</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity onPress={() => setCurrentScreen('upload')} style={styles.tabItem}>
-          <UploadCloud size={20} color={currentScreen === 'upload' ? '#22c55e' : '#71717a'} />
-          <Text style={[styles.tabLabel, currentScreen === 'upload' && { color: '#22c55e' }]}>Import</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* FULL SCREEN PLAYER MODAL DIALOG */}
-      <Modal animationType="slide" transparent={false} visible={isPlayerModalVisible}>
+        {/* MINI PLAYER */}
         {currentSong && (
-          <SafeAreaView style={styles.fullPlayerContainer}>
-            <StatusBar barStyle="light-content" />
-
-            {/* Back Handle */}
-            <View style={styles.fullPlayerHeader}>
-              <TouchableOpacity onPress={() => setIsPlayerModalVisible(false)} style={styles.closePlayerButton}>
-                <ChevronDown size={28} color="#fff" />
-              </TouchableOpacity>
-              <Text style={styles.fullPlayerHeaderTitle}>NOW PLAYING</Text>
-              <View style={{ width: 40 }} />
-            </View>
-
-            {/* Album Cover Art */}
-            <View style={styles.fullPlayerCoverContainer}>
-              <Image
-                source={{
-                  uri: currentSong.coverUrl ? `${serverUrl}${currentSong.coverUrl}` : 'https://placehold.co/400',
-                }}
-                style={styles.fullPlayerCover as any}
-              />
-            </View>
-
-            {/* Song Meta Information */}
-            <View style={styles.fullPlayerMeta}>
-              <Text style={styles.fullPlayerTitle} numberOfLines={1}>
+          <TouchableOpacity style={styles.miniPlayer} onPress={() => setIsPlayerModalVisible(true)}>
+            <Image
+              source={{ uri: currentSong.coverUrl ? `${serverUrl}${currentSong.coverUrl}` : 'https://placehold.co/100' }}
+              style={styles.miniPlayerImage as any}
+            />
+            <View style={styles.miniPlayerDetails}>
+              <Text style={styles.miniPlayerTitle} numberOfLines={1}>
                 {currentSong.title}
               </Text>
-              <Text style={styles.fullPlayerArtist} numberOfLines={1}>
+              <Text style={styles.miniPlayerArtist} numberOfLines={1}>
                 {currentSong.artist}
               </Text>
             </View>
-
-            {/* Custom Precision Touch Seek Bar */}
-            <View style={styles.seekContainer}>
-              <TouchableOpacity
-                activeOpacity={0.9}
-                onPress={handleSeek}
-                onLayout={(e) => {
-                  progressWidthRef.current = e.nativeEvent.layout.width;
-                }}
-                style={styles.progressBarWrapper}
-              >
-                <View style={styles.progressTrack}>
-                  <View
-                    style={[
-                      styles.progressFill,
-                      { width: `${((currentTime || 0) / (duration || 1)) * 100}%` },
-                    ]}
-                  />
-                </View>
-              </TouchableOpacity>
-
-              <View style={styles.timeRow}>
-                <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
-                <Text style={styles.timeText}>{formatTime(duration)}</Text>
-              </View>
-            </View>
-
-            {/* Player Controls (Shuffle, Prev, Play, Next, Loop) */}
-            <View style={styles.controlsRow}>
-              <TouchableOpacity onPress={() => setIsShuffle(!isShuffle)}>
-                <Shuffle size={20} color={isShuffle ? '#22c55e' : '#71717a'} />
-              </TouchableOpacity>
-
-              <TouchableOpacity onPress={playPrevious}>
-                <SkipBack size={32} color="#fff" fill="#fff" />
-              </TouchableOpacity>
-
-              <TouchableOpacity onPress={togglePlay} style={styles.fullPlayButton}>
-                {isPlaying ? (
-                  <Pause size={28} color="#000" fill="#000" />
-                ) : (
-                  <Play size={28} color="#000" fill="#000" style={{ marginLeft: 4 }} />
-                )}
-              </TouchableOpacity>
-
-              <TouchableOpacity onPress={playNext}>
-                <SkipForward size={32} color="#fff" fill="#fff" />
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                onPress={() => {
-                  const modes: ('none' | 'all' | 'one')[] = ['none', 'all', 'one'];
-                  const next = (modes.indexOf(isLoop) + 1) % modes.length;
-                  setIsLoop(modes[next]);
-                }}
-              >
-                <Repeat size={20} color={isLoop !== 'none' ? '#22c55e' : '#71717a'} />
-                {isLoop === 'one' && (
-                  <Text style={styles.loopOneIndicator}>1</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </SafeAreaView>
+            <TouchableOpacity onPress={togglePlay} style={styles.miniPlayerPlayButton}>
+              {isPlaying ? (
+                <Pause size={18} color="#000" fill="#000" />
+              ) : (
+                <Play size={18} color="#000" fill="#000" style={{ marginLeft: 2 }} />
+              )}
+            </TouchableOpacity>
+          </TouchableOpacity>
         )}
-      </Modal>
-    </SafeAreaView>
-  );
+
+        {/* TAB BAR */}
+        <View style={styles.tabBar}>
+          <TouchableOpacity
+            onPress={() => {
+              setCurrentScreen('home');
+              setActivePlaylist(null);
+            }}
+            style={styles.tabItem}
+          >
+            <Music size={20} color={currentScreen === 'home' ? '#22c55e' : '#71717a'} />
+            <Text style={[styles.tabLabel, currentScreen === 'home' && { color: '#22c55e' }]}>Home</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={() => setCurrentScreen('radio')} style={styles.tabItem}>
+            <Radio size={20} color={currentScreen === 'radio' ? '#22c55e' : '#71717a'} />
+            <Text style={[styles.tabLabel, currentScreen === 'radio' && { color: '#22c55e' }]}>Radio</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={() => setCurrentScreen('upload')} style={styles.tabItem}>
+            <UploadCloud size={20} color={currentScreen === 'upload' ? '#22c55e' : '#71717a'} />
+            <Text style={[styles.tabLabel, currentScreen === 'upload' && { color: '#22c55e' }]}>Import</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* FULL PLAYER MODAL */}
+        <Modal animationType="slide" transparent={false} visible={isPlayerModalVisible}>
+          {currentSong && (
+            <SafeAreaView style={styles.fullPlayerContainer}>
+              <StatusBar barStyle="light-content" />
+
+              <View style={styles.fullPlayerHeader}>
+                <TouchableOpacity onPress={() => setIsPlayerModalVisible(false)} style={styles.closePlayerButton}>
+                  <ChevronDown size={28} color="#fff" />
+                </TouchableOpacity>
+                <Text style={styles.fullPlayerHeaderTitle}>
+                  {isRadioMode ? 'RADIO' : 'NOW PLAYING'}
+                </Text>
+                <View style={{ width: 40 }} />
+              </View>
+
+              <View style={styles.fullPlayerCoverContainer}>
+                <Image
+                  source={{
+                    uri: currentSong.coverUrl ? `${serverUrl}${currentSong.coverUrl}` : 'https://placehold.co/400',
+                  }}
+                  style={styles.fullPlayerCover as any}
+                />
+              </View>
+
+              <View style={styles.fullPlayerMeta}>
+                <Text style={styles.fullPlayerTitle} numberOfLines={1}>
+                  {currentSong.title}
+                </Text>
+                <Text style={styles.fullPlayerArtist} numberOfLines={1}>
+                  {currentSong.artist}
+                </Text>
+              </View>
+
+              <View style={styles.seekContainer}>
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  onPress={handleSeek}
+                  onLayout={(e) => {
+                    progressWidthRef.current = e.nativeEvent.layout.width;
+                  }}
+                  style={styles.progressBarWrapper}
+                >
+                  <View style={styles.progressTrack}>
+                    <View
+                      style={[
+                        styles.progressFill,
+                        { width: `${((currentTime || 0) / (duration || 1)) * 100}%` },
+                      ]}
+                    />
+                  </View>
+                </TouchableOpacity>
+
+                <View style={styles.timeRow}>
+                  <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
+                  <Text style={styles.timeText}>{formatTime(duration)}</Text>
+                </View>
+              </View>
+
+              <View style={styles.controlsRow}>
+                {isRadioMode ? (
+                  <TouchableOpacity onPress={togglePlay} style={styles.fullPlayButton}>
+                    {isPlaying ? (
+                      <Pause size={28} color="#000" fill="#000" />
+                    ) : (
+                      <Play size={28} color="#000" fill="#000" style={{ marginLeft: 4 }} />
+                    )}
+                  </TouchableOpacity>
+                ) : (
+                  <>
+                    <TouchableOpacity onPress={() => setIsShuffle(!isShuffle)}>
+                      <Shuffle size={20} color={isShuffle ? '#22c55e' : '#71717a'} />
+                    </TouchableOpacity>
+
+                    <TouchableOpacity onPress={playPrevious}>
+                      <SkipBack size={32} color="#fff" fill="#fff" />
+                    </TouchableOpacity>
+
+                    <TouchableOpacity onPress={togglePlay} style={styles.fullPlayButton}>
+                      {isPlaying ? (
+                        <Pause size={28} color="#000" fill="#000" />
+                      ) : (
+                        <Play size={28} color="#000" fill="#000" style={{ marginLeft: 4 }} />
+                      )}
+                    </TouchableOpacity>
+
+                    <TouchableOpacity onPress={playNext}>
+                      <SkipForward size={32} color="#fff" fill="#fff" />
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={() => {
+                        const modes: ('none' | 'all' | 'one')[] = ['none', 'all', 'one'];
+                        const next = (modes.indexOf(isLoop) + 1) % modes.length;
+                        setIsLoop(modes[next]);
+                      }}
+                    >
+                      <Repeat size={20} color={isLoop !== 'none' ? '#22c55e' : '#71717a'} />
+                      {isLoop === 'one' && (
+                        <Text style={styles.loopOneIndicator}>1</Text>
+                      )}
+                    </TouchableOpacity>
+                  </>
+                )}
+              </View>
+            </SafeAreaView>
+          )}
+        </Modal>
+      </SafeAreaView>
+    );
+  } catch (e) {
+    console.error('Render error:', e);
+    if (!hasError) setHasError(true);
+    return (
+      <View style={styles.loadingContainer}>
+        <Text style={{ color: '#fff', fontSize: 18 }}>Something went wrong</Text>
+      </View>
+    );
+  }
 }
 
-// Styling system
 const styles = StyleSheet.create({
   loadingContainer: {
     flex: 1,

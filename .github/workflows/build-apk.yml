@@ -29,6 +29,11 @@ jobs:
           cd mobile
           npm install
 
+      - name: Install expo-file-system
+        run: |
+          cd mobile
+          npx expo install expo-file-system
+
       - name: Expo Prebuild (Generate Native Android Project)
         run: |
           cd mobile
