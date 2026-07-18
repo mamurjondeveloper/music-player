@@ -34,8 +34,12 @@ interface PlayerState {
   setPlaybackSpeed: (speed: number) => void;
   toggleShuffle: () => void;
   toggleLoop: () => void;
+  isQueueOpen: boolean;
+  toggleQueue: () => void;
   addToQueue: (song: Song) => void;
+  playNextInQueue: (song: Song) => void;
   removeFromQueue: (songId: string) => void;
+  clearQueue: () => void;
   setQueue: (songs: Song[]) => void;
 }
 
@@ -74,6 +78,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => {
     isShuffle: false,
     isLoop: 'none',
     audio: null,
+    isQueueOpen: false,
 
     init: () => {
       if (typeof window === 'undefined' || audioInstance) return;
@@ -182,11 +187,14 @@ export const usePlayerStore = create<PlayerState>((set, get) => {
       activeAudio.src = `${API_URL}${song.audioUrl}`;
       activeAudio.playbackRate = get().playbackSpeed;
 
+      const newHistory = [song, ...state.history.filter((s) => s.id !== song.id)].slice(0, 50);
+
       set({
         currentSong: song,
         isPlaying: true,
         currentTime: 0,
         duration: song.duration,
+        history: newHistory,
       });
 
       localStorage.setItem('symphony_current_song', JSON.stringify(song));
@@ -313,18 +321,54 @@ export const usePlayerStore = create<PlayerState>((set, get) => {
       set({ isLoop: loops[nextIndex] });
     },
 
+    toggleQueue: () => {
+      set({ isQueueOpen: !get().isQueueOpen });
+    },
+
     addToQueue: (song) => {
       const state = get();
       if (state.queue.some((s) => s.id === song.id)) return;
-      set({ queue: [...state.queue, song] });
+      const newQueue = [...state.queue, song];
+      set({ queue: newQueue });
+      localStorage.setItem('symphony_queue', JSON.stringify(newQueue));
+    },
+
+    playNextInQueue: (song) => {
+      const state = get();
+      const currentSong = state.currentSong;
+      let newQueue = [...state.queue];
+
+      newQueue = newQueue.filter((s) => s.id !== song.id);
+
+      if (currentSong) {
+        const idx = newQueue.findIndex((s) => s.id === currentSong.id);
+        if (idx !== -1) {
+          newQueue.splice(idx + 1, 0, song);
+        } else {
+          newQueue = [currentSong, song, ...newQueue];
+        }
+      } else {
+        newQueue = [song, ...newQueue];
+      }
+
+      set({ queue: newQueue });
+      localStorage.setItem('symphony_queue', JSON.stringify(newQueue));
     },
 
     removeFromQueue: (songId) => {
-      set({ queue: get().queue.filter((s) => s.id !== songId) });
+      const newQueue = get().queue.filter((s) => s.id !== songId);
+      set({ queue: newQueue });
+      localStorage.setItem('symphony_queue', JSON.stringify(newQueue));
+    },
+
+    clearQueue: () => {
+      set({ queue: [] });
+      localStorage.setItem('symphony_queue', JSON.stringify([]));
     },
 
     setQueue: (songs) => {
       set({ queue: songs });
+      localStorage.setItem('symphony_queue', JSON.stringify(songs));
     },
   };
 });
