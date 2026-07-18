@@ -7,6 +7,8 @@ import { Loader2 } from 'lucide-react';
 import Sidebar from '../components/Sidebar';
 import BottomPlayer from '../components/BottomPlayer';
 import MobileNav from '../components/MobileNav';
+import { QueueSidebar } from '../components/QueueSidebar';
+import { ToastContainer } from '../components/ui/Toast';
 import useKeyboardShortcuts from '../hooks/useKeyboardShortcuts';
 
 export default function ClientLayout({ children }: { children: React.ReactNode }) {
@@ -61,6 +63,12 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
           {children}
         </main>
       </div>
+
+      {/* Desktop Queue Sidebar (Right) */}
+      <QueueSidebar />
+
+      {/* Global Toast Notifications */}
+      <ToastContainer />
 
       {/* Sticky Music Player (Bottom) */}
       <BottomPlayer />

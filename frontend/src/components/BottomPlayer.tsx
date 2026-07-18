@@ -15,6 +15,7 @@ import {
   Maximize2,
   ChevronDown,
   Gauge,
+  ListMusic,
 } from 'lucide-react';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
@@ -36,6 +37,7 @@ export default function BottomPlayer() {
     playbackSpeed,
     isShuffle,
     isLoop,
+    isQueueOpen,
     init,
     togglePlay,
     playNext,
@@ -45,6 +47,7 @@ export default function BottomPlayer() {
     setPlaybackSpeed,
     toggleShuffle,
     toggleLoop,
+    toggleQueue,
   } = usePlayerStore();
 
   const [isExpanded, setIsExpanded] = useState(false);
@@ -170,6 +173,22 @@ export default function BottomPlayer() {
 
         {/* Right Section: Volume & Playback Speed (Desktop) */}
         <div className="hidden md:flex items-center justify-end gap-4 w-1/3 relative">
+          {/* Queue Toggle Button */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleQueue();
+            }}
+            className={`p-2 rounded-xl border transition-colors cursor-pointer ${
+              isQueueOpen
+                ? 'bg-primary/10 border-primary/20 text-primary'
+                : 'bg-white/5 border-white/5 text-gray-400 hover:text-white'
+            }`}
+            title="Queue"
+          >
+            <ListMusic className="h-4 w-4" />
+          </button>
+
           {/* Playback speed trigger */}
           <div className="relative">
             <button
