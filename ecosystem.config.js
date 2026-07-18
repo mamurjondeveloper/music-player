@@ -3,7 +3,7 @@ module.exports = {
     {
       name: 'symphony-backend',
       cwd: './backend',
-      script: 'dist/main.js',
+      script: 'dist/src/main.js',
       env: {
         PORT: 4000,
         DATABASE_URL: 'file:./dev.db',
