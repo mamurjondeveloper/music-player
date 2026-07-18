@@ -1,56 +1,69 @@
-import React, { useState, useEffect } from 'react';
+import React, { Component, ReactNode } from 'react';
 import { View, Text, ScrollView, SafeAreaView, TouchableOpacity } from 'react-native';
 import App from './App';
 
-export default function ErrorCatcher() {
-  const [error, setError] = useState<string | null>(null);
+interface Props {
+  children?: ReactNode;
+}
 
-  useEffect(() => {
-    // Intercept global errors
-    const defaultHandler = (global as any).ErrorUtils.getGlobalHandler();
-    
-    (global as any).ErrorUtils.setGlobalHandler((err: any, isFatal: boolean) => {
-      setError(`Fatal: ${isFatal}\nMessage: ${err.message}\nStack: ${err.stack}`);
-    });
+interface State {
+  hasError: boolean;
+  error: Error | null;
+  errorInfo: React.ErrorInfo | null;
+}
 
-    // Also catch unhandled promise rejections
-    try {
-      const rejectionTracker = require('promise/setimmediate/rejection-tracking');
-      rejectionTracker.enable({
-        allRejections: true,
-        onUnhandled: (id: string, err: any) => {
-          setError(`Unhandled Promise Rejection:\nMessage: ${err?.message || err}\nStack: ${err?.stack || ''}`);
-        },
-        onHandled: () => {},
-      });
-    } catch (e) {}
-  }, []);
-
-  if (error) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: '#7f1d1d' }}>
-        <ScrollView contentContainerStyle={{ padding: 24, paddingTop: 60 }}>
-          <Text style={{ fontSize: 24, fontWeight: 'bold', color: 'white', marginBottom: 16 }}>
-            App Crashed!
-          </Text>
-          <Text style={{ color: 'white', fontSize: 14, marginBottom: 24 }}>
-            Please take a screenshot of this error and show it to the developer.
-          </Text>
-          <View style={{ backgroundColor: 'black', padding: 16, borderRadius: 8 }}>
-            <Text style={{ color: '#ef4444', fontFamily: 'monospace', fontSize: 12 }}>
-              {error}
-            </Text>
-          </View>
-          <TouchableOpacity 
-            style={{ marginTop: 24, backgroundColor: 'white', padding: 12, borderRadius: 8, alignItems: 'center' }}
-            onPress={() => setError(null)}
-          >
-            <Text style={{ color: '#7f1d1d', fontWeight: 'bold' }}>Dismiss & Try Again</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </SafeAreaView>
-    );
+class ErrorBoundary extends Component<Props, State> {
+  constructor(props: Props) {
+    super(props);
+    this.state = { hasError: false, error: null, errorInfo: null };
   }
 
-  return <App />;
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    this.setState({ errorInfo });
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#7f1d1d' }}>
+          <ScrollView contentContainerStyle={{ padding: 24, paddingTop: 60 }}>
+            <Text style={{ fontSize: 24, fontWeight: 'bold', color: 'white', marginBottom: 16 }}>
+              React Render Error!
+            </Text>
+            <Text style={{ color: 'white', fontSize: 14, marginBottom: 24 }}>
+              Iltimos, ushbu xatoni skrinshot qilib dasturchiga yuboring:
+            </Text>
+            <View style={{ backgroundColor: 'black', padding: 16, borderRadius: 8 }}>
+              <Text style={{ color: '#ef4444', fontFamily: 'monospace', fontSize: 12 }}>
+                {this.state.error?.toString()}
+              </Text>
+              <Text style={{ color: '#fca5a5', fontFamily: 'monospace', fontSize: 10, marginTop: 8 }}>
+                {this.state.errorInfo?.componentStack}
+              </Text>
+            </View>
+            <TouchableOpacity 
+              style={{ marginTop: 24, backgroundColor: 'white', padding: 12, borderRadius: 8, alignItems: 'center' }}
+              onPress={() => this.setState({ hasError: false, error: null, errorInfo: null })}
+            >
+              <Text style={{ color: '#7f1d1d', fontWeight: 'bold' }}>Qayta urunish</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </SafeAreaView>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+export default function ErrorCatcher() {
+  return (
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
+  );
 }
