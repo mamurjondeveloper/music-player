@@ -12,9 +12,8 @@
     "android": {
       "package": "com.xisd.music",
       "permissions": [
-        "FOREGROUND_SERVICE",
-        "FOREGROUND_SERVICE_MEDIA_PLAYBACK",
-        "WAKE_LOCK"
+        "WAKE_LOCK",
+        "INTERNET"
       ],
       "adaptiveIcon": {
         "backgroundColor": "#121214",
