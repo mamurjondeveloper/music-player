@@ -218,7 +218,7 @@ export class SongsService {
   async extractPlaylistVideos(playlistUrl: string): Promise<string[]> {
     const cookiesPath = path.join(process.cwd(), 'cookies.txt');
     const cookiesArg = fs.existsSync(cookiesPath) ? `--cookies "${cookiesPath}"` : '';
-    const jsRuntimeArg = '--js-runtimes node';
+    const jsRuntimeArg = '--js-runtimes node --remote-components ejs:github';
 
     try {
       // Use yt-dlp --flat-playlist to quickly list all video IDs in JSON
@@ -368,7 +368,7 @@ export class SongsService {
       ? `--extractor-args "youtubepot-bgutilscript:script_path=${potScriptPath}"`
       : '';
 
-    const jsRuntimeArg = '--js-runtimes node';
+    const jsRuntimeArg = '--js-runtimes node --remote-components ejs:github';
 
     try {
       // 1. Fetch metadata in JSON format
