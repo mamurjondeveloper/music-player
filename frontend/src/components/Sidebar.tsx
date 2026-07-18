@@ -16,6 +16,7 @@ import {
   LogOut,
   ChevronRight,
   FolderHeart,
+  Radio,
 } from 'lucide-react';
 import api from '@/services/api';
 
@@ -45,6 +46,7 @@ export default function Sidebar() {
 
   const links = [
     { name: 'Home', href: '/', icon: Home },
+    { name: 'Radio', href: '/radio', icon: Radio },
     { name: 'Search', href: '/search', icon: Search },
     { name: 'Liked Songs', href: '/liked', icon: Heart },
     { name: 'History', href: '/history', icon: History },
