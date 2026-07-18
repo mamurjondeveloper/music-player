@@ -1,8 +1,12 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 
 @Injectable()
 export class SongsService {
@@ -202,5 +206,120 @@ export class SongsService {
       },
     });
     return history.map((h) => h.song);
+  }
+
+  async importFromYoutube(url: string) {
+    const ytIdRegex = /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
+    const match = url.match(ytIdRegex);
+    if (!match) {
+      throw new BadRequestException('Invalid YouTube URL');
+    }
+    const videoId = match[1];
+
+    // Duplicate detection
+    const existing = await this.prisma.song.findUnique({
+      where: { youtubeId: videoId },
+    });
+    if (existing) {
+      return { song: existing, alreadyExists: true };
+    }
+
+    const songId = crypto.randomUUID();
+    const audioFilename = `${songId}.mp3`;
+    const audioPath = path.join(process.cwd(), 'uploads/songs', audioFilename);
+    const audioUrl = `/uploads/songs/${audioFilename}`;
+
+    try {
+      // 1. Fetch metadata in JSON format
+      const { stdout: metadataStdout } = await execAsync(
+        `yt-dlp -j "https://www.youtube.com/watch?v=${videoId}"`
+      );
+      const info = JSON.parse(metadataStdout);
+
+      // Extract metadata fields
+      const title = info.title || 'Unknown Title';
+      const artist = info.uploader || 'Unknown Artist';
+      const album = 'YouTube';
+      const duration = info.duration ? Math.round(info.duration) : 0;
+      const description = info.description || null;
+      const youtubeUploadDate = info.upload_date || null; // format YYYYMMDD
+      const originalUrl = `https://www.youtube.com/watch?v=${videoId}`;
+      
+      // 2. Download audio stream and convert to mp3 via ffmpeg
+      await execAsync(
+        `yt-dlp -x --audio-format mp3 --audio-quality 192K -o "${audioPath}" "https://www.youtube.com/watch?v=${videoId}"`
+      );
+
+      // 3. Check file details after download
+      let fileSize = 0;
+      if (fs.existsSync(audioPath)) {
+        fileSize = fs.statSync(audioPath).size;
+      }
+      const bitrate = 192000; // 192 Kbps
+
+      // 4. Download high resolution cover
+      const coverUrl = await this.downloadCover(videoId, songId);
+
+      // 5. Create database record
+      const song = await this.prisma.song.create({
+        data: {
+          id: songId,
+          title,
+          artist,
+          album,
+          duration,
+          audioUrl,
+          coverUrl,
+          youtubeId: videoId,
+          originalUrl,
+          sourceType: 'YOUTUBE',
+          fileSize,
+          bitrate,
+          description,
+          youtubeUploadDate,
+        },
+      });
+
+      return { song, alreadyExists: false };
+    } catch (e: any) {
+      console.error('YouTube import failed:', e);
+      // Clean up file if partially downloaded
+      if (fs.existsSync(audioPath)) {
+        try { fs.unlinkSync(audioPath); } catch {}
+      }
+      throw new InternalServerErrorException(`YouTube import failed: ${e.message}`);
+    }
+  }
+
+  private async downloadCover(videoId: string, songId: string): Promise<string | null> {
+    const resolutions = [
+      'maxresdefault.jpg',
+      'sddefault.jpg',
+      'hqdefault.jpg',
+      'mqdefault.jpg',
+      'default.jpg'
+    ];
+    
+    const coversDir = path.join(process.cwd(), 'uploads/covers');
+    const targetPath = path.join(coversDir, `${songId}.jpg`);
+    
+    for (const res of resolutions) {
+      const url = `https://img.youtube.com/vi/${videoId}/${res}`;
+      try {
+        const response = await fetch(url);
+        if (response.ok) {
+          const buffer = Buffer.from(await response.arrayBuffer());
+          // Double-check if the buffer is a valid image (maxresdefault sometimes returns a small placeholder if not found)
+          if (res === 'maxresdefault.jpg' && buffer.length < 2000) {
+            continue;
+          }
+          fs.writeFileSync(targetPath, buffer);
+          return `/uploads/covers/${songId}.jpg`;
+        }
+      } catch (e) {
+        // Try next resolution
+      }
+    }
+    return null;
   }
 }

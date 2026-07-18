@@ -21,17 +21,27 @@ model User {
 }
 
 model Song {
-  id           String        @id @default(uuid())
-  title        String
-  artist       String        @default("Unknown Artist")
-  album        String        @default("Unknown Album")
-  duration     Int           // in seconds
-  audioUrl     String        // relative path to local audio file
-  coverUrl     String?       // relative path to extracted cover image
-  playCount    Int           @default(0)
-  uploadDate   DateTime      @default(now())
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  id                String        @id @default(uuid())
+  title             String
+  artist            String        @default("Unknown Artist")
+  album             String        @default("Unknown Album")
+  duration          Int           // in seconds
+  audioUrl          String        // relative path to local audio file
+  coverUrl          String?       // relative path to extracted cover image
+  playCount         Int           @default(0)
+  uploadDate        DateTime      @default(now())
+  
+  // YouTube specific metadata fields
+  youtubeId         String?       @unique
+  originalUrl       String?
+  sourceType        String        @default("UPLOAD") // "UPLOAD" or "YOUTUBE"
+  fileSize          Int?          // in bytes
+  bitrate           Int?          // in bps
+  description       String?
+  youtubeUploadDate String?
+  
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
 
   playlistSongs PlaylistSong[]
   likedSongs    LikedSong[]

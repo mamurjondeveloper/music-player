@@ -9,6 +9,7 @@ import {
   UploadedFile,
   UseGuards,
   BadRequestException,
+  Body,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { SongsService } from './songs.service';
@@ -40,6 +41,14 @@ export class SongsController {
       throw new BadRequestException('Unsupported audio format. Supported: MP3, WAV, FLAC');
     }
     return this.songsService.createSong(file);
+  }
+
+  @Post('youtube')
+  async importYoutube(@Body('url') url: string) {
+    if (!url) {
+      throw new BadRequestException('YouTube URL is required');
+    }
+    return this.songsService.importFromYoutube(url);
   }
 
   @Get()
