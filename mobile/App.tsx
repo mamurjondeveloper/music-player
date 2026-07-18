@@ -30,7 +30,7 @@ import {
   Repeat,
   Music,
   Search,
-  UploadCloud,
+  Upload,
   LogOut,
   ChevronDown,
   Plus,
@@ -1038,7 +1038,7 @@ export default function App() {
           </TouchableOpacity>
 
           <TouchableOpacity onPress={() => setCurrentScreen('upload')} style={styles.tabItem}>
-            <UploadCloud size={20} color={currentScreen === 'upload' ? '#22c55e' : '#71717a'} />
+            <Upload size={20} color={currentScreen === 'upload' ? '#22c55e' : '#71717a'} />
             <Text style={[styles.tabLabel, currentScreen === 'upload' && { color: '#22c55e' }]}>Import</Text>
           </TouchableOpacity>
         </View>
