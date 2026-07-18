@@ -28,6 +28,7 @@ jobs:
         run: |
           cd mobile
           npm install
+          npx expo install react-native-svg
 
       - name: Expo Prebuild (Generate Native Android Project)
         run: |
