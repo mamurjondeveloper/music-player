@@ -1,0 +1,87 @@
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String        @id @default(uuid())
+  username     String        @unique
+  passwordHash String
+  avatarUrl    String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  
+  playlists    Playlist[]
+  likedSongs   LikedSong[]
+  history      History[]
+}
+
+model Song {
+  id           String        @id @default(uuid())
+  title        String
+  artist       String        @default("Unknown Artist")
+  album        String        @default("Unknown Album")
+  duration     Int           // in seconds
+  audioUrl     String        // relative path to local audio file
+  coverUrl     String?       // relative path to extracted cover image
+  playCount    Int           @default(0)
+  uploadDate   DateTime      @default(now())
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  playlistSongs PlaylistSong[]
+  likedSongs    LikedSong[]
+  history       History[]
+}
+
+model Playlist {
+  id           String        @id @default(uuid())
+  name         String
+  description  String?
+  coverUrl     String?
+  userId       String
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  playlistSongs PlaylistSong[]
+}
+
+model PlaylistSong {
+  id         String   @id @default(uuid())
+  playlistId String
+  songId     String
+  orderIndex Int
+  createdAt  DateTime @default(now())
+  
+  playlist   Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  song       Song     @relation(fields: [songId], references: [id], onDelete: Cascade)
+
+  @@unique([playlistId, songId])
+}
+
+model LikedSong {
+  id        String   @id @default(uuid())
+  userId    String
+  songId    String
+  createdAt DateTime @default(now())
+  
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  song      Song     @relation(fields: [songId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, songId])
+}
+
+model History {
+  id        String   @id @default(uuid())
+  userId    String
+  songId    String
+  playedAt  DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  song      Song     @relation(fields: [songId], references: [id], onDelete: Cascade)
+}
