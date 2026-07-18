@@ -235,13 +235,15 @@ export class SongsService {
 
     const potScriptPath = '/root/bgutil-ytdlp-pot-provider/server/build/generate_once.js';
     const potArg = (!cookiesArg && fs.existsSync(potScriptPath))
-      ? `--js-runtimes node --extractor-args "youtubepot-bgutilscript:script_path=${potScriptPath}"`
+      ? `--extractor-args "youtubepot-bgutilscript:script_path=${potScriptPath}"`
       : '';
+
+    const jsRuntimeArg = '--js-runtimes node';
 
     try {
       // 1. Fetch metadata in JSON format
       const { stdout: metadataStdout } = await execAsync(
-        `yt-dlp ${cookiesArg} ${potArg} -j "https://www.youtube.com/watch?v=${videoId}"`
+        `yt-dlp ${cookiesArg} ${potArg} ${jsRuntimeArg} -j "https://www.youtube.com/watch?v=${videoId}"`
       );
       const info = JSON.parse(metadataStdout);
 
@@ -256,7 +258,7 @@ export class SongsService {
       
       // 2. Download audio stream and convert to mp3 via ffmpeg
       await execAsync(
-        `yt-dlp ${cookiesArg} ${potArg} -x --audio-format mp3 --audio-quality 192K -o "${audioPath}" "https://www.youtube.com/watch?v=${videoId}"`
+        `yt-dlp ${cookiesArg} ${potArg} ${jsRuntimeArg} -x --audio-format mp3 --audio-quality 192K -o "${audioPath}" "https://www.youtube.com/watch?v=${videoId}"`
       );
 
       // 3. Check file details after download
