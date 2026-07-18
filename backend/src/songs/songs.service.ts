@@ -208,6 +208,13 @@ export class SongsService {
     return history.map((h) => h.song);
   }
 
+  private importQueue: any[] = [];
+  private isProcessingQueue = false;
+
+  getImportQueueStatus() {
+    return this.importQueue;
+  }
+
   async importFromYoutube(url: string) {
     const ytIdRegex = /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
     const match = url.match(ytIdRegex);
@@ -221,8 +228,72 @@ export class SongsService {
       where: { youtubeId: videoId },
     });
     if (existing) {
-      return { song: existing, alreadyExists: true };
+      return { song: existing, alreadyExists: true, status: 'completed' };
     }
+
+    // Check if already in queue
+    const inQueue = this.importQueue.find(
+      (item) => item.url === url && (item.status === 'pending' || item.status === 'importing')
+    );
+    if (inQueue) {
+      return { status: 'queued', id: inQueue.id, alreadyExists: false };
+    }
+
+    const queueId = crypto.randomUUID();
+    const newItem = {
+      id: queueId,
+      url,
+      title: 'Queued...',
+      status: 'pending' as const,
+      addedAt: new Date(),
+    };
+
+    this.importQueue.unshift(newItem);
+    if (this.importQueue.length > 50) {
+      this.importQueue.pop();
+    }
+
+    // Start background processor asynchronously (non-blocking)
+    this.processQueue();
+
+    return { status: 'queued', id: queueId, alreadyExists: false };
+  }
+
+  private async processQueue() {
+    if (this.isProcessingQueue) return;
+    this.isProcessingQueue = true;
+
+    try {
+      while (true) {
+        // Fetch next pending job (oldest first)
+        const nextItem = [...this.importQueue].reverse().find((item) => item.status === 'pending');
+        if (!nextItem) break;
+
+        nextItem.status = 'importing';
+        nextItem.title = 'Downloading...';
+
+        try {
+          const result = await this.executeYoutubeImport(nextItem.url);
+          nextItem.status = 'completed';
+          nextItem.title = result.song.title;
+        } catch (e: any) {
+          nextItem.status = 'failed';
+          nextItem.error = e.message || 'Import failed';
+          nextItem.title = 'Failed to import';
+        }
+      }
+    } finally {
+      this.isProcessingQueue = false;
+    }
+  }
+
+  async executeYoutubeImport(url: string) {
+    const ytIdRegex = /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
+    const match = url.match(ytIdRegex);
+    if (!match) {
+      throw new BadRequestException('Invalid YouTube URL');
+    }
+    const videoId = match[1];
 
     const songId = crypto.randomUUID();
     const audioFilename = `${songId}.mp3`;

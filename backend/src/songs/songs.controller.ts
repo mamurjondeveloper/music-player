@@ -51,6 +51,11 @@ export class SongsController {
     return this.songsService.importFromYoutube(url);
   }
 
+  @Get('import-status')
+  async getImportStatus() {
+    return this.songsService.getImportQueueStatus();
+  }
+
   @Get()
   async getAll() {
     return this.songsService.findAll();

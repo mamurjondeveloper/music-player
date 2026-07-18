@@ -15,9 +15,10 @@ interface UploadItem {
 }
 
 interface YoutubeImportItem {
+  id?: string;
   url: string;
   title: string;
-  status: 'importing' | 'completed' | 'failed';
+  status: 'pending' | 'importing' | 'completed' | 'failed';
   error?: string;
 }
 
@@ -31,6 +32,21 @@ export default function UploadPage() {
   const [ytUrl, setYtUrl] = useState('');
   const [isImporting, setIsImporting] = useState(false);
   const [youtubeImports, setYoutubeImports] = useState<YoutubeImportItem[]>([]);
+
+  // Poll YouTube background imports status
+  React.useEffect(() => {
+    const fetchStatus = async () => {
+      try {
+        const response = await api.get('/songs/import-status');
+        setYoutubeImports(response.data);
+      } catch (err) {}
+    };
+
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 3000); // poll every 3 seconds
+
+    return () => clearInterval(interval);
+  }, []);
 
   // Local File Upload Handlers
   const handleDrag = (e: React.DragEvent) => {
@@ -154,49 +170,24 @@ export default function UploadPage() {
     setYtUrl('');
     setIsImporting(true);
 
-    const importItem: YoutubeImportItem = {
-      url,
-      title: 'Fetching metadata...',
-      status: 'importing',
-    };
-    setYoutubeImports((prev) => [importItem, ...prev]);
-
     try {
       const response = await api.post('/songs/youtube', { url });
       
-      setYoutubeImports((prev) =>
-        prev.map((item) => {
-          if (item.url === url) {
-            return {
-              ...item,
-              title: response.data.song.title,
-              status: 'completed',
-            };
-          }
-          return item;
-        })
-      );
-
-      if (response.data.alreadyExists) {
-        showToast(`"${response.data.song.title}" already exists in library!`, 'warning');
+      if (response.data.status === 'completed') {
+        if (response.data.alreadyExists) {
+          showToast(`"${response.data.song.title}" already exists in library!`, 'warning');
+        } else {
+          showToast(`"${response.data.song.title}" successfully imported!`, 'success');
+        }
       } else {
-        showToast(`"${response.data.song.title}" successfully imported!`, 'success');
+        showToast('YouTube link added to background download queue!', 'success');
       }
+
+      // Fetch status immediately to show the queued item
+      const statusRes = await api.get('/songs/import-status');
+      setYoutubeImports(statusRes.data);
     } catch (err: any) {
       const errMsg = err.response?.data?.message || 'YouTube import failed.';
-      setYoutubeImports((prev) =>
-        prev.map((item) => {
-          if (item.url === url) {
-            return {
-              ...item,
-              title: 'Failed to import video',
-              status: 'failed',
-              error: errMsg,
-            };
-          }
-          return item;
-        })
-      );
       showToast(errMsg, 'error');
     } finally {
       setIsImporting(false);
@@ -372,6 +363,12 @@ export default function UploadPage() {
                       </div>
 
                       <div className="shrink-0 flex items-center gap-2">
+                        {item.status === 'pending' && (
+                          <div className="flex items-center gap-1.5 text-xs text-zinc-400 font-semibold animate-pulse">
+                            <Loader2 className="h-4 w-4 animate-spin opacity-60" />
+                            <span>Queued...</span>
+                          </div>
+                        )}
                         {item.status === 'importing' && (
                           <div className="flex items-center gap-1.5 text-xs text-primary font-semibold">
                             <Loader2 className="h-4 w-4 animate-spin" />
