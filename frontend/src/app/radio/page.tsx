@@ -8,11 +8,11 @@ import { Radio, Play, Pause, Disc, Sparkles } from 'lucide-react';
 
 export default function RadioPage() {
   const { user } = useAuthStore();
-  const { currentSong, isPlaying, playSong, setQueue, queue } = usePlayerStore();
+  const { currentSong, isPlaying, playSong, setQueue, setRadioMode, togglePlay } = usePlayerStore();
   
   const [songs, setSongs] = useState<Song[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isRadioActive, setIsRadioActive] = useState(false);
+  const [isRadioStarted, setIsRadioStarted] = useState(false);
 
   useEffect(() => {
     const fetchAllSongs = async () => {
@@ -28,25 +28,48 @@ export default function RadioPage() {
     if (user) fetchAllSongs();
   }, [user]);
 
-  // Check if current playing song is part of a radio queue
+  // When navigating away, disable radio mode
   useEffect(() => {
-    if (songs.length > 0 && queue.length > 0 && currentSong) {
-      // visual cues
-    }
-  }, [queue, currentSong, songs]);
+    return () => {
+      // Cleanup is handled by the user navigating away
+    };
+  }, []);
 
   const startRadio = () => {
     if (songs.length === 0) return;
     
-    // Shuffle all songs
-    const shuffled = [...songs].sort(() => Math.random() - 0.5);
+    // Shuffle all songs using Fisher-Yates
+    const shuffled = [...songs];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
     
-    // Play the first one, pass the rest as queue
+    // Enable radio mode (disables skip controls)
+    setRadioMode(true);
+    
+    // Enable loop-all so it never stops
+    const store = usePlayerStore.getState();
+    if (store.isLoop !== 'all') {
+      // Set loop to 'all' so the queue repeats endlessly
+      while (usePlayerStore.getState().isLoop !== 'all') {
+        store.toggleLoop();
+      }
+    }
+    // Enable shuffle
+    if (!store.isShuffle) {
+      store.toggleShuffle();
+    }
+    
+    // Play the first one, pass entire shuffled list as queue
     playSong(shuffled[0], shuffled);
-    setIsRadioActive(true);
+    setIsRadioStarted(true);
   };
 
-  const currentRadioSong = currentSong;
+  const stopRadio = () => {
+    setRadioMode(false);
+    setIsRadioStarted(false);
+  };
 
   if (loading) {
     return (
@@ -59,7 +82,7 @@ export default function RadioPage() {
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[75vh] px-4">
-      {/* Dynamic Background Glow based on state */}
+      {/* Dynamic Background Glow */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-primary/20 rounded-full blur-[120px] pointer-events-none -z-10" />
 
       <div className="text-center space-y-4 mb-12">
@@ -68,37 +91,43 @@ export default function RadioPage() {
         </div>
         <h1 className="text-4xl md:text-5xl font-black text-white tracking-tight">Symphony Radio</h1>
         <p className="text-gray-400 text-lg max-w-lg mx-auto">
-          Endless stream of randomized tracks from your entire library. Just sit back, relax, and let the music flow.
+          Endless stream of randomized tracks from your entire library. Sit back, relax, and let the music flow.
         </p>
       </div>
 
       <div className="glass-panel p-8 md:p-12 rounded-[3rem] w-full max-w-2xl text-center relative overflow-hidden border border-white/10 shadow-2xl">
-        {/* Subtle decorative elements */}
         <Sparkles className="absolute top-6 left-6 h-5 w-5 text-primary/40" />
         <Sparkles className="absolute bottom-6 right-6 h-6 w-6 text-primary/30" />
 
         <div className="relative mx-auto w-48 h-48 md:w-64 md:h-64 mb-10">
-          <div className={`absolute inset-0 rounded-full border-4 border-primary/30 ${isPlaying ? 'animate-[spin_3s_linear_infinite]' : ''} border-t-primary shadow-[0_0_40px_rgba(34,197,94,0.4)]`} />
+          <div className={`absolute inset-0 rounded-full border-4 border-primary/30 ${isPlaying && isRadioStarted ? 'animate-[spin_3s_linear_infinite]' : ''} border-t-primary shadow-[0_0_40px_rgba(34,197,94,0.4)]`} />
           <div className="absolute inset-2 rounded-full overflow-hidden bg-black flex items-center justify-center">
-            {currentRadioSong?.coverUrl ? (
+            {currentSong?.coverUrl && isRadioStarted ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}${currentRadioSong.coverUrl}`}
+                src={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}${currentSong.coverUrl}`}
                 alt="Cover"
                 className={`w-full h-full object-cover ${isPlaying ? 'animate-[spin_10s_linear_infinite]' : ''}`}
               />
             ) : (
-              <Disc className={`w-24 h-24 text-gray-700 ${isPlaying ? 'animate-[spin_4s_linear_infinite]' : ''}`} />
+              <Disc className={`w-24 h-24 text-gray-700 ${isPlaying && isRadioStarted ? 'animate-[spin_4s_linear_infinite]' : ''}`} />
             )}
           </div>
-          {/* Inner hole of the vinyl */}
+          {/* Inner vinyl hole */}
           <div className="absolute inset-0 m-auto w-12 h-12 bg-black rounded-full border-4 border-white/10 z-10" />
         </div>
 
-        {currentRadioSong ? (
+        {currentSong && isRadioStarted ? (
           <div className="space-y-3 mb-8">
-            <h2 className="text-2xl font-bold text-white truncate px-4">{currentRadioSong.title}</h2>
-            <p className="text-primary font-medium text-lg truncate px-4">{currentRadioSong.artist}</p>
+            <h2 className="text-2xl font-bold text-white truncate px-4">{currentSong.title}</h2>
+            <p className="text-primary font-medium text-lg truncate px-4">{currentSong.artist}</p>
+            {/* Play/Pause only - no skip */}
+            <button
+              onClick={togglePlay}
+              className="mt-4 inline-flex items-center justify-center h-14 w-14 rounded-full bg-primary text-black hover:scale-110 active:scale-95 transition-all shadow-[0_0_20px_rgba(34,197,94,0.3)] cursor-pointer"
+            >
+              {isPlaying ? <Pause className="h-7 w-7 fill-black" /> : <Play className="h-7 w-7 fill-black ml-1" />}
+            </button>
           </div>
         ) : (
           <div className="space-y-3 mb-8">
@@ -107,14 +136,25 @@ export default function RadioPage() {
           </div>
         )}
 
-        <button
-          onClick={startRadio}
-          className="group relative inline-flex items-center justify-center gap-3 px-8 py-4 bg-primary text-black rounded-full font-bold text-lg hover:bg-primary-hover hover:scale-105 active:scale-95 transition-all shadow-[0_0_30px_rgba(34,197,94,0.4)] overflow-hidden"
-        >
-          <div className="absolute inset-0 w-full h-full bg-white/20 -translate-x-full group-hover:animate-[shimmer_1.5s_infinite]" />
-          <Play className="h-6 w-6 fill-black" />
-          <span>{currentRadioSong ? 'Shuffle & Restart Radio' : 'Start Radio'}</span>
-        </button>
+        <div className="flex gap-4 justify-center">
+          <button
+            onClick={startRadio}
+            className="group relative inline-flex items-center justify-center gap-3 px-8 py-4 bg-primary text-black rounded-full font-bold text-lg hover:bg-primary-hover hover:scale-105 active:scale-95 transition-all shadow-[0_0_30px_rgba(34,197,94,0.4)] overflow-hidden"
+          >
+            <div className="absolute inset-0 w-full h-full bg-white/20 -translate-x-full group-hover:animate-[shimmer_1.5s_infinite]" />
+            <Play className="h-6 w-6 fill-black" />
+            <span>{isRadioStarted ? 'Restart Radio' : 'Start Radio'}</span>
+          </button>
+
+          {isRadioStarted && (
+            <button
+              onClick={stopRadio}
+              className="inline-flex items-center justify-center gap-2 px-6 py-4 bg-white/10 text-white rounded-full font-bold text-lg hover:bg-white/20 active:scale-95 transition-all"
+            >
+              Stop Radio
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

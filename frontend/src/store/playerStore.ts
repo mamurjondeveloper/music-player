@@ -41,6 +41,8 @@ interface PlayerState {
   removeFromQueue: (songId: string) => void;
   clearQueue: () => void;
   setQueue: (songs: Song[]) => void;
+  isRadioMode: boolean;
+  setRadioMode: (mode: boolean) => void;
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
@@ -79,6 +81,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => {
     isLoop: 'none',
     audio: null,
     isQueueOpen: false,
+    isRadioMode: false,
 
     init: () => {
       if (typeof window === 'undefined' || audioInstance) return;
@@ -369,6 +372,10 @@ export const usePlayerStore = create<PlayerState>((set, get) => {
     setQueue: (songs) => {
       set({ queue: songs });
       localStorage.setItem('symphony_queue', JSON.stringify(songs));
+    },
+
+    setRadioMode: (mode) => {
+      set({ isRadioMode: mode });
     },
   };
 });

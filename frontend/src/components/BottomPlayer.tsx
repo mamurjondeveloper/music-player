@@ -38,6 +38,7 @@ export default function BottomPlayer() {
     isShuffle,
     isLoop,
     isQueueOpen,
+    isRadioMode,
     init,
     togglePlay,
     playNext,
@@ -118,39 +119,47 @@ export default function BottomPlayer() {
         {/* Center Section: Playback controls & Progress bar (Desktop) */}
         <div className="hidden md:flex flex-col items-center w-1/3 max-w-xl">
           <div className="flex items-center gap-6 mb-2">
-            <button
-              onClick={toggleShuffle}
-              className={`p-1 transition-colors cursor-pointer ${
-                isShuffle ? 'text-primary' : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              <Shuffle className="h-5 w-5" />
-            </button>
-            <button onClick={playPrevious} className="p-1 text-gray-400 hover:text-white transition-colors cursor-pointer">
-              <SkipBack className="h-5 w-5" />
-            </button>
+            {!isRadioMode && (
+              <button
+                onClick={toggleShuffle}
+                className={`p-1 transition-colors cursor-pointer ${
+                  isShuffle ? 'text-primary' : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                <Shuffle className="h-5 w-5" />
+              </button>
+            )}
+            {!isRadioMode && (
+              <button onClick={playPrevious} className="p-1 text-gray-400 hover:text-white transition-colors cursor-pointer">
+                <SkipBack className="h-5 w-5" />
+              </button>
+            )}
             <button
               onClick={handlePlayPause}
               className="h-10 w-10 rounded-full bg-primary hover:bg-primary-hover text-bg-dark flex items-center justify-center shadow-md shadow-primary/20 hover:scale-105 transition-all cursor-pointer"
             >
               {isPlaying ? <Pause className="h-5 w-5 fill-bg-dark" /> : <Play className="h-5 w-5 fill-bg-dark ml-0.5" />}
             </button>
-            <button onClick={playNext} className="p-1 text-gray-400 hover:text-white transition-colors cursor-pointer">
-              <SkipForward className="h-5 w-5" />
-            </button>
-            <button
-              onClick={toggleLoop}
-              className={`p-1 transition-colors cursor-pointer relative ${
-                isLoop !== 'none' ? 'text-primary' : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              <Repeat className="h-5 w-5" />
-              {isLoop === 'one' && (
-                <span className="absolute top-0 -right-1 text-[8px] bg-primary text-bg-dark rounded-full px-0.5 font-bold scale-90">
-                  1
-                </span>
-              )}
-            </button>
+            {!isRadioMode && (
+              <button onClick={playNext} className="p-1 text-gray-400 hover:text-white transition-colors cursor-pointer">
+                <SkipForward className="h-5 w-5" />
+              </button>
+            )}
+            {!isRadioMode && (
+              <button
+                onClick={toggleLoop}
+                className={`p-1 transition-colors cursor-pointer relative ${
+                  isLoop !== 'none' ? 'text-primary' : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                <Repeat className="h-5 w-5" />
+                {isLoop === 'one' && (
+                  <span className="absolute top-0 -right-1 text-[8px] bg-primary text-bg-dark rounded-full px-0.5 font-bold scale-90">
+                    1
+                  </span>
+                )}
+              </button>
+            )}
           </div>
 
           {/* Seek bar */}
@@ -260,15 +269,17 @@ export default function BottomPlayer() {
           >
             {isPlaying ? <Pause className="h-5 w-5 fill-bg-dark text-bg-dark" /> : <Play className="h-5 w-5 fill-bg-dark text-bg-dark ml-0.5" />}
           </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              playNext();
-            }}
-            className="p-1 text-gray-400 hover:text-white cursor-pointer"
-          >
-            <SkipForward className="h-5 w-5" />
-          </button>
+          {!isRadioMode && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                playNext();
+              }}
+              className="p-1 text-gray-400 hover:text-white cursor-pointer"
+            >
+              <SkipForward className="h-5 w-5" />
+            </button>
+          )}
         </div>
 
         {/* Mobile progress line at bottom of mini player */}
@@ -347,18 +358,22 @@ export default function BottomPlayer() {
             {/* Playback Controls (Bottom) */}
             <div className="pb-12 pt-6 flex flex-col items-center gap-6">
               <div className="flex items-center justify-between w-full max-w-xs">
-                <button
-                  onClick={toggleShuffle}
-                  className={`p-2 transition-colors cursor-pointer ${
-                    isShuffle ? 'text-primary' : 'text-gray-400'
-                  }`}
-                >
-                  <Shuffle className="h-6 w-6" />
-                </button>
+                {!isRadioMode && (
+                  <button
+                    onClick={toggleShuffle}
+                    className={`p-2 transition-colors cursor-pointer ${
+                      isShuffle ? 'text-primary' : 'text-gray-400'
+                    }`}
+                  >
+                    <Shuffle className="h-6 w-6" />
+                  </button>
+                )}
 
-                <button onClick={playPrevious} className="p-2 text-white cursor-pointer">
-                  <SkipBack className="h-7 w-7" />
-                </button>
+                {!isRadioMode && (
+                  <button onClick={playPrevious} className="p-2 text-white cursor-pointer">
+                    <SkipBack className="h-7 w-7" />
+                  </button>
+                )}
 
                 <button
                   onClick={togglePlay}
@@ -367,23 +382,27 @@ export default function BottomPlayer() {
                   {isPlaying ? <Pause className="h-8 w-8 text-bg-dark fill-bg-dark" /> : <Play className="h-8 w-8 text-bg-dark fill-bg-dark ml-1" />}
                 </button>
 
-                <button onClick={playNext} className="p-2 text-white cursor-pointer">
-                  <SkipForward className="h-7 w-7" />
-                </button>
+                {!isRadioMode && (
+                  <button onClick={playNext} className="p-2 text-white cursor-pointer">
+                    <SkipForward className="h-7 w-7" />
+                  </button>
+                )}
 
-                <button
-                  onClick={toggleLoop}
-                  className={`p-2 transition-colors cursor-pointer relative ${
-                    isLoop !== 'none' ? 'text-primary' : 'text-gray-400'
-                  }`}
-                >
-                  <Repeat className="h-6 w-6" />
-                  {isLoop === 'one' && (
-                    <span className="absolute top-1 -right-0 text-[8px] bg-primary text-bg-dark rounded-full px-0.5 font-bold scale-90">
-                      1
-                    </span>
-                  )}
-                </button>
+                {!isRadioMode && (
+                  <button
+                    onClick={toggleLoop}
+                    className={`p-2 transition-colors cursor-pointer relative ${
+                      isLoop !== 'none' ? 'text-primary' : 'text-gray-400'
+                    }`}
+                  >
+                    <Repeat className="h-6 w-6" />
+                    {isLoop === 'one' && (
+                      <span className="absolute top-1 -right-0 text-[8px] bg-primary text-bg-dark rounded-full px-0.5 font-bold scale-90">
+                        1
+                      </span>
+                    )}
+                  </button>
+                )}
               </div>
 
               {/* Volume Slider for mobile inside full page */}
