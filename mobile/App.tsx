@@ -69,7 +69,8 @@ interface ImportItem {
   error?: string;
 }
 
-const SONGS_CACHE_DIR = FileSystem.documentDirectory + 'songs/';
+const documentDir = FileSystem.documentDirectory || 'file:///data/user/0/com.xisd.music/files/';
+const SONGS_CACHE_DIR = documentDir + 'songs/';
 
 async function ensureCacheDir() {
   const info = await FileSystem.getInfoAsync(SONGS_CACHE_DIR);
