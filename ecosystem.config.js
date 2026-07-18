@@ -15,9 +15,9 @@ module.exports = {
       name: 'symphony-frontend',
       cwd: './frontend',
       script: 'node_modules/next/dist/bin/next',
-      args: 'start -p 3000',
+      args: 'start -p 3001',
       env: {
-        PORT: 3000,
+        PORT: 3001,
         NODE_ENV: 'production',
       },
     },
