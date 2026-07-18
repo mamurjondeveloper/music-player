@@ -215,7 +215,59 @@ export class SongsService {
     return this.importQueue;
   }
 
+  async extractPlaylistVideos(playlistUrl: string): Promise<string[]> {
+    const cookiesPath = path.join(process.cwd(), 'cookies.txt');
+    const cookiesArg = fs.existsSync(cookiesPath) ? `--cookies "${cookiesPath}"` : '';
+    const jsRuntimeArg = '--js-runtimes node';
+
+    try {
+      // Use yt-dlp --flat-playlist to quickly list all video IDs in JSON
+      const { stdout } = await execAsync(
+        `yt-dlp ${cookiesArg} ${jsRuntimeArg} --flat-playlist --dump-single-json "${playlistUrl}"`
+      );
+      const data = JSON.parse(stdout);
+      if (data && data.entries) {
+        return data.entries
+          .filter((entry: any) => entry && entry.id)
+          .map((entry: any) => `https://www.youtube.com/watch?v=${entry.id}`);
+      }
+      return [];
+    } catch (e: any) {
+      console.error('Failed to extract playlist videos:', e.message);
+      return [];
+    }
+  }
+
   async importFromYoutube(url: string) {
+    // Check if it is a playlist (contains list= parameter)
+    if (url.includes('list=')) {
+      try {
+        const videoUrls = await this.extractPlaylistVideos(url);
+        if (videoUrls.length > 0) {
+          let enqueuedCount = 0;
+          for (const videoUrl of videoUrls) {
+            try {
+              await this.enqueueSingleVideo(videoUrl);
+              enqueuedCount++;
+            } catch (err) {
+              // Skip invalid videos in playlist
+            }
+          }
+          return {
+            status: 'queued',
+            alreadyExists: false,
+            message: `Enqueued ${enqueuedCount} videos from playlist`,
+          };
+        }
+      } catch (e: any) {
+        console.warn('Could not parse playlist, falling back to single video', e.message);
+      }
+    }
+
+    return this.enqueueSingleVideo(url);
+  }
+
+  async enqueueSingleVideo(url: string) {
     const ytIdRegex = /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
     const match = url.match(ytIdRegex);
     if (!match) {
@@ -249,11 +301,11 @@ export class SongsService {
     };
 
     this.importQueue.unshift(newItem);
-    if (this.importQueue.length > 50) {
+    if (this.importQueue.length > 200) { // increased queue display limit for playlist support
       this.importQueue.pop();
     }
 
-    // Start background processor asynchronously (non-blocking)
+    // Start background processor asynchronously
     this.processQueue();
 
     return { status: 'queued', id: queueId, alreadyExists: false };
@@ -264,10 +316,17 @@ export class SongsService {
     this.isProcessingQueue = true;
 
     try {
+      let isFirst = true;
       while (true) {
         // Fetch next pending job (oldest first)
         const nextItem = [...this.importQueue].reverse().find((item) => item.status === 'pending');
         if (!nextItem) break;
+
+        if (!isFirst) {
+          // Delay for 4 seconds between downloads to avoid YouTube's bot-detection rate limits
+          await new Promise((resolve) => setTimeout(resolve, 4000));
+        }
+        isFirst = false;
 
         nextItem.status = 'importing';
         nextItem.title = 'Downloading...';
