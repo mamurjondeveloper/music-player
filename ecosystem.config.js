@@ -1,3 +1,4 @@
+// Changes here are picked up by .github/workflows/deploy.yml on push to main.
 module.exports = {
   apps: [
     {
