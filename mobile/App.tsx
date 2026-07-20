@@ -48,7 +48,7 @@ import {
   UserPlus,
   Copy,
   Camera,
-  CheckCircle2,
+  CircleCheckBig,
   Clock,
 } from 'lucide-react-native';
 
@@ -1401,7 +1401,7 @@ export default function App() {
                         <Text style={styles.inviteRowCode}>{invite.code}</Text>
                         {invite.usedBy ? (
                           <View style={styles.inviteRowStatus}>
-                            <CheckCircle2 size={14} color="#71717a" />
+                            <CircleCheckBig size={14} color="#71717a" />
                             <Text style={styles.inviteRowStatusText}>Used</Text>
                           </View>
                         ) : (
