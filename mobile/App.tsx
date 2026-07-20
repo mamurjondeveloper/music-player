@@ -966,6 +966,11 @@ export default function App() {
                         <Text style={styles.queueItemUrl} numberOfLines={1}>
                           {item.url}
                         </Text>
+                        {item.status === 'failed' && item.error && (
+                          <Text style={styles.queueItemError} numberOfLines={2}>
+                            {item.error}
+                          </Text>
+                        )}
                       </View>
                       <View style={styles.queueStatusContainer}>
                         {item.status === 'pending' && (
@@ -1493,6 +1498,11 @@ const styles = StyleSheet.create({
     color: '#52525b',
     fontSize: 10,
     marginTop: 2,
+  },
+  queueItemError: {
+    color: '#ef4444',
+    fontSize: 10,
+    marginTop: 4,
   },
   queueStatusContainer: {
     alignItems: 'flex-end',

@@ -359,6 +359,9 @@ export default function UploadPage() {
                         <div className="min-w-0 flex-1">
                           <div className="text-sm font-semibold text-white truncate">{item.title}</div>
                           <div className="text-[10px] text-zinc-500 truncate mt-0.5">{item.url}</div>
+                          {item.status === 'failed' && item.error && (
+                            <div className="text-[11px] text-red-400/90 mt-1 line-clamp-2">{item.error}</div>
+                          )}
                         </div>
                       </div>
 

@@ -3,10 +3,44 @@ import { PrismaService } from '../prisma.service';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
+// yt-dlp --dump-single-json output for large playlists can easily exceed Node's 1MB default maxBuffer.
+const YTDLP_MAX_BUFFER = 50 * 1024 * 1024;
+
+function buildYtDlpArgs(...extra: string[]): string[] {
+  const args: string[] = [];
+  const cookiesPath = path.join(process.cwd(), 'cookies.txt');
+  const hasCookies = fs.existsSync(cookiesPath);
+  if (hasCookies) {
+    args.push('--cookies', cookiesPath);
+  }
+
+  // Falls back to the bgutil PO-token provider (if deployed) when no browser cookies are available,
+  // to work around YouTube's "Sign in to confirm you're not a bot" checks.
+  const potScriptPath = '/root/bgutil-ytdlp-pot-provider/server/build/generate_once.js';
+  if (!hasCookies && fs.existsSync(potScriptPath)) {
+    args.push('--extractor-args', `youtubepot-bgutilscript:script_path=${potScriptPath}`);
+  }
+
+  args.push('--js-runtimes', 'node', '--remote-components', 'ejs:github');
+  args.push(...extra);
+  return args;
+}
+
+const YOUTUBE_URL_REGEX = /^https?:\/\/(www\.|m\.)?(youtube\.com|youtu\.be)\//i;
+
+// yt-dlp failures raise "Command failed: yt-dlp ...\n<stderr>" — pull out just the
+// last meaningful line (usually the actual "ERROR: ..." from yt-dlp itself) so the
+// queue/UI shows something a person can act on instead of the whole process dump.
+function extractYtDlpError(e: any): string {
+  const raw: string = e?.stderr || e?.message || 'Unknown error';
+  const lines = raw.split('\n').map((l) => l.trim()).filter(Boolean);
+  const errorLine = [...lines].reverse().find((l) => /error/i.test(l));
+  return errorLine || lines[lines.length - 1] || 'Unknown error';
+}
 
 @Injectable()
 export class SongsService {
@@ -216,52 +250,55 @@ export class SongsService {
   }
 
   async extractPlaylistVideos(playlistUrl: string): Promise<string[]> {
-    const cookiesPath = path.join(process.cwd(), 'cookies.txt');
-    const cookiesArg = fs.existsSync(cookiesPath) ? `--cookies "${cookiesPath}"` : '';
-    const jsRuntimeArg = '--js-runtimes node --remote-components ejs:github';
-
-    try {
-      // Use yt-dlp --flat-playlist to quickly list all video IDs in JSON
-      const { stdout } = await execAsync(
-        `yt-dlp ${cookiesArg} ${jsRuntimeArg} --flat-playlist --dump-single-json "${playlistUrl}"`
-      );
-      const data = JSON.parse(stdout);
-      if (data && data.entries) {
-        return data.entries
-          .filter((entry: any) => entry && entry.id)
-          .map((entry: any) => `https://www.youtube.com/watch?v=${entry.id}`);
-      }
-      return [];
-    } catch (e: any) {
-      console.error('Failed to extract playlist videos:', e.message);
-      return [];
+    // Use yt-dlp --flat-playlist to quickly list all video IDs in JSON.
+    // Large playlists can produce >1MB of JSON, hence the raised maxBuffer.
+    const { stdout } = await execFileAsync(
+      'yt-dlp',
+      buildYtDlpArgs('--flat-playlist', '--dump-single-json', playlistUrl),
+      { maxBuffer: YTDLP_MAX_BUFFER },
+    );
+    const data = JSON.parse(stdout);
+    if (data && data.entries) {
+      return data.entries
+        .filter((entry: any) => entry && entry.id)
+        .map((entry: any) => `https://www.youtube.com/watch?v=${entry.id}`);
     }
+    return [];
   }
 
   async importFromYoutube(url: string) {
+    if (!YOUTUBE_URL_REGEX.test(url)) {
+      throw new BadRequestException('Please provide a valid youtube.com or youtu.be URL');
+    }
+
     // Check if it is a playlist (contains list= parameter)
     if (url.includes('list=')) {
+      let videoUrls: string[];
       try {
-        const videoUrls = await this.extractPlaylistVideos(url);
-        if (videoUrls.length > 0) {
-          let enqueuedCount = 0;
-          for (const videoUrl of videoUrls) {
-            try {
-              await this.enqueueSingleVideo(videoUrl);
-              enqueuedCount++;
-            } catch (err) {
-              // Skip invalid videos in playlist
-            }
-          }
-          return {
-            status: 'queued',
-            alreadyExists: false,
-            message: `Enqueued ${enqueuedCount} videos from playlist`,
-          };
-        }
+        videoUrls = await this.extractPlaylistVideos(url);
       } catch (e: any) {
-        console.warn('Could not parse playlist, falling back to single video', e.message);
+        console.error('Failed to extract playlist videos:', e.message);
+        throw new InternalServerErrorException(`Could not read playlist: ${extractYtDlpError(e)}`);
       }
+
+      if (videoUrls.length === 0) {
+        throw new BadRequestException('Playlist is empty, private, or unavailable');
+      }
+
+      let enqueuedCount = 0;
+      for (const videoUrl of videoUrls) {
+        try {
+          await this.enqueueSingleVideo(videoUrl);
+          enqueuedCount++;
+        } catch (err) {
+          // Skip invalid videos in playlist
+        }
+      }
+      return {
+        status: 'queued',
+        alreadyExists: false,
+        message: `Enqueued ${enqueuedCount} videos from playlist`,
+      };
     }
 
     return this.enqueueSingleVideo(url);
@@ -358,22 +395,13 @@ export class SongsService {
     const audioFilename = `${songId}.mp3`;
     const audioPath = path.join(process.cwd(), 'uploads/songs', audioFilename);
     const audioUrl = `/uploads/songs/${audioFilename}`;
-
-    // Secure cookie and po_token parameters configuration
-    const cookiesPath = path.join(process.cwd(), 'cookies.txt');
-    const cookiesArg = fs.existsSync(cookiesPath) ? `--cookies "${cookiesPath}"` : '';
-
-    const potScriptPath = '/root/bgutil-ytdlp-pot-provider/server/build/generate_once.js';
-    const potArg = (!cookiesArg && fs.existsSync(potScriptPath))
-      ? `--extractor-args "youtubepot-bgutilscript:script_path=${potScriptPath}"`
-      : '';
-
-    const jsRuntimeArg = '--js-runtimes node --remote-components ejs:github';
+    const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
 
     try {
       // 1. Fetch metadata in JSON format
-      const { stdout: metadataStdout } = await execAsync(
-        `yt-dlp ${cookiesArg} ${potArg} ${jsRuntimeArg} -j "https://www.youtube.com/watch?v=${videoId}"`
+      const { stdout: metadataStdout } = await execFileAsync(
+        'yt-dlp',
+        buildYtDlpArgs('-j', videoUrl),
       );
       const info = JSON.parse(metadataStdout);
 
@@ -384,11 +412,12 @@ export class SongsService {
       const duration = info.duration ? Math.round(info.duration) : 0;
       const description = info.description || null;
       const youtubeUploadDate = info.upload_date || null; // format YYYYMMDD
-      const originalUrl = `https://www.youtube.com/watch?v=${videoId}`;
-      
+      const originalUrl = videoUrl;
+
       // 2. Download audio stream and convert to mp3 via ffmpeg
-      await execAsync(
-        `yt-dlp ${cookiesArg} ${potArg} ${jsRuntimeArg} -x --audio-format mp3 --audio-quality 192K -o "${audioPath}" "https://www.youtube.com/watch?v=${videoId}"`
+      await execFileAsync(
+        'yt-dlp',
+        buildYtDlpArgs('-x', '--audio-format', 'mp3', '--audio-quality', '192K', '-o', audioPath, videoUrl),
       );
 
       // 3. Check file details after download
@@ -428,7 +457,7 @@ export class SongsService {
       if (fs.existsSync(audioPath)) {
         try { fs.unlinkSync(audioPath); } catch {}
       }
-      throw new InternalServerErrorException(`YouTube import failed: ${e.message}`);
+      throw new InternalServerErrorException(`YouTube import failed: ${extractYtDlpError(e)}`);
     }
   }
 
