@@ -58,8 +58,13 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
       <Sidebar />
 
       {/* Main Content Area (Center) */}
-      <div className="flex flex-1 flex-col overflow-hidden pb-24 md:pb-24">
-        <main className="flex-1 overflow-y-auto px-4 py-6 md:px-8 no-scrollbar">
+      <div className="flex flex-1 flex-col overflow-hidden">
+        {/*
+          Bottom clearance so the last bit of content never sits behind the fixed
+          player: mobile stacks the mini-player (h-20) on top of the nav bar (h-16),
+          so it needs more room than desktop, which only has the player bar (h-24).
+        */}
+        <main className="flex-1 overflow-y-auto px-4 py-6 md:px-8 pb-40 md:pb-28 no-scrollbar">
           {children}
         </main>
       </div>
