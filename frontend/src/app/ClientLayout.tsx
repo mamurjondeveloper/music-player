@@ -22,13 +22,13 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
     initialize();
   }, [initialize]);
 
-  const isLoginPage = pathname === '/login';
+  const isPublicPage = pathname === '/login' || pathname === '/register';
 
   useEffect(() => {
-    if (isInitialized && !isAuthenticated && !isLoginPage) {
+    if (isInitialized && !isAuthenticated && !isPublicPage) {
       router.push('/login');
     }
-  }, [isInitialized, isAuthenticated, isLoginPage, router]);
+  }, [isInitialized, isAuthenticated, isPublicPage, router]);
 
   if (!isInitialized) {
     return (
@@ -38,8 +38,8 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
     );
   }
 
-  // Render Login page with no sidebar/player wrapper
-  if (isLoginPage) {
+  // Render Login/Register pages with no sidebar/player wrapper
+  if (isPublicPage) {
     return <>{children}</>;
   }
 

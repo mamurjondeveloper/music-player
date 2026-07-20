@@ -5,15 +5,15 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '../../store/authStore';
 import { motion } from 'framer-motion';
-import { Music, Lock, User, AlertCircle, Loader2 } from 'lucide-react';
+import { Music, Lock, User, KeyRound, AlertCircle, Loader2 } from 'lucide-react';
 
-export default function LoginPage() {
+export default function RegisterPage() {
   const router = useRouter();
-  const { login, isAuthenticated, isInitialized, error, isLoading, initialize } = useAuthStore();
+  const { register, isAuthenticated, isInitialized, error, isLoading, initialize } = useAuthStore();
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [rememberMe, setRememberMe] = useState(false);
+  const [inviteCode, setInviteCode] = useState('');
 
   useEffect(() => {
     initialize();
@@ -27,8 +27,8 @@ export default function LoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username || !password) return;
-    const success = await login(username, password);
+    if (!username || !password || !inviteCode) return;
+    const success = await register(username, password, inviteCode);
     if (success) {
       router.push('/');
     }
@@ -58,8 +58,8 @@ export default function LoginPage() {
           <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-4 border border-primary/20 shadow-[0_0_20px_rgba(34,197,94,0.2)]">
             <Music className="h-8 w-8 text-primary" />
           </div>
-          <h2 className="text-3xl font-bold tracking-tight text-white">Symphony</h2>
-          <p className="text-gray-400 mt-2 text-sm text-center">Your private high-fidelity music room</p>
+          <h2 className="text-3xl font-bold tracking-tight text-white">Create Account</h2>
+          <p className="text-gray-400 mt-2 text-sm text-center">Join Symphony with your invite code</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
@@ -90,8 +90,9 @@ export default function LoginPage() {
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="Enter username"
+                placeholder="Choose a username"
                 required
+                autoCapitalize="none"
                 className="w-full bg-white/5 border border-white/10 rounded-2xl py-3 pl-12 pr-4 text-white placeholder-gray-500 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/50 transition-all text-sm"
               />
             </div>
@@ -113,23 +114,35 @@ export default function LoginPage() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter password"
+                placeholder="At least 6 characters"
                 required
                 className="w-full bg-white/5 border border-white/10 rounded-2xl py-3 pl-12 pr-4 text-white placeholder-gray-500 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/50 transition-all text-sm"
               />
             </div>
           </div>
 
-          <div className="flex items-center justify-between text-sm">
-            <label className="flex items-center gap-2 text-gray-300 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={rememberMe}
-                onChange={(e) => setRememberMe(e.target.checked)}
-                className="rounded border-white/10 bg-white/5 text-primary focus:ring-0 cursor-pointer h-4 w-4"
-              />
-              <span>Remember me</span>
+          <div className="space-y-2">
+            <label
+              className="text-xs font-semibold text-gray-300 uppercase tracking-wider block"
+              htmlFor="inviteCode"
+            >
+              Invite Code
             </label>
+            <div className="relative">
+              <span className="absolute inset-y-0 left-0 pl-4 flex items-center text-gray-400">
+                <KeyRound className="h-5 w-5" />
+              </span>
+              <input
+                id="inviteCode"
+                type="text"
+                value={inviteCode}
+                onChange={(e) => setInviteCode(e.target.value)}
+                placeholder="Ask the owner for this"
+                required
+                autoCapitalize="none"
+                className="w-full bg-white/5 border border-white/10 rounded-2xl py-3 pl-12 pr-4 text-white placeholder-gray-500 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/50 transition-all text-sm"
+              />
+            </div>
           </div>
 
           <motion.button
@@ -139,13 +152,13 @@ export default function LoginPage() {
             disabled={isLoading}
             className="w-full bg-primary hover:bg-primary-hover text-bg-dark font-bold py-3.5 px-4 rounded-2xl shadow-lg shadow-primary/20 flex items-center justify-center gap-2 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm mt-8"
           >
-            {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Sign In'}
+            {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Create Account'}
           </motion.button>
 
           <p className="text-center text-sm text-gray-400">
-            Have an invite code?{' '}
-            <Link href="/register" className="text-primary hover:text-primary-hover font-semibold">
-              Create an account
+            Already have an account?{' '}
+            <Link href="/login" className="text-primary hover:text-primary-hover font-semibold">
+              Sign in
             </Link>
           </p>
         </form>

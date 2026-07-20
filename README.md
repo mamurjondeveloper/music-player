@@ -93,12 +93,14 @@ Follow these steps to configure your environment and run Symphony locally:
    ```
 
 2. **Initialize Backend Configurations**:
-   Make sure you check the backend environment variables in `backend/.env`:
+   Create `backend/.env` (this file is git-ignored — never commit real secrets) with:
    ```env
    DATABASE_URL="file:./dev.db"
-   JWT_SECRET="super_secret_music_jwt_key_12345"
+   JWT_SECRET="<generate a long random string, e.g. `openssl rand -hex 32`>"
    PORT=4000
+   INVITE_CODE="<a code you share privately with people you want to let register>"
    ```
+   `JWT_SECRET` has no default fallback — the server refuses to start without it. `INVITE_CODE` gates the `/auth/register` page/screen; leave it unset to disable public registration entirely.
 
 3. **Install Dependencies**:
    Open a terminal and install dependencies for both applications:
@@ -117,11 +119,13 @@ Follow these steps to configure your environment and run Symphony locally:
 
 ---
 
-## 🔑 Default Credentials
+## 🔑 Accounts
 
 The database migration seeds a default account you can use immediately:
 - **Username**: `admin`
 - **Password**: `password123`
+
+Additional accounts (for friends/family) are created via the **Register** page/screen, which requires the invite code set in `INVITE_CODE` (see [Getting Started](#-getting-started)) — there is no open public sign-up.
 
 ---
 

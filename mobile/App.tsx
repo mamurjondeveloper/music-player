@@ -39,6 +39,7 @@ import {
   User as UserIcon,
   Globe,
   Radio,
+  KeyRound,
 } from 'lucide-react-native';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -110,8 +111,10 @@ export default function App() {
   const [currentScreen, setCurrentScreen] = useState<'login' | 'home' | 'playlists' | 'upload' | 'radio'>('login');
 
   const [serverUrl] = useState('https://api.music.xisd.uz');
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('');
+  const [inviteCode, setInviteCode] = useState('');
   const [token, setToken] = useState<string | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -298,6 +301,33 @@ export default function App() {
     } catch (err: any) {
       const msg = err.response?.data?.message || 'Login failed. Check server URL and credentials.';
       Alert.alert('Login Failed', msg);
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleRegister = async () => {
+    if (!username || !password || !inviteCode) {
+      Alert.alert('Error', 'Please fill in all fields, including the invite code');
+      return;
+    }
+    setIsLoggingIn(true);
+    try {
+      const res = await axios.post(`${serverUrl}/auth/register`, {
+        username,
+        password,
+        inviteCode,
+      });
+      const jwtToken = res.data.access_token;
+
+      await SecureStore.setItemAsync('symphony_jwt_token', jwtToken);
+      await AsyncStorage.setItem('symphony_server_url', serverUrl);
+
+      setToken(jwtToken);
+      setCurrentScreen('home');
+    } catch (err: any) {
+      const msg = err.response?.data?.message || 'Registration failed. Check your details.';
+      Alert.alert('Registration Failed', msg);
     } finally {
       setIsLoggingIn(false);
     }
@@ -580,7 +610,9 @@ export default function App() {
             <View style={styles.logoContainer}>
               <Music size={54} color="#22c55e" />
               <Text style={styles.logoText}>Symphony</Text>
-              <Text style={styles.logoSubtext}>Private Music Player</Text>
+              <Text style={styles.logoSubtext}>
+                {authMode === 'login' ? 'Private Music Player' : 'Create Your Account'}
+              </Text>
             </View>
 
             <View style={styles.inputGroup}>
@@ -629,12 +661,47 @@ export default function App() {
               </View>
             </View>
 
-            <TouchableOpacity style={styles.loginButton} onPress={handleLogin} disabled={isLoggingIn}>
+            {authMode === 'register' && (
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>INVITE CODE</Text>
+                <View style={styles.inputWrapper}>
+                  <KeyRound size={18} color="#71717a" style={styles.inputIcon} />
+                  <TextInput
+                    value={inviteCode}
+                    onChangeText={setInviteCode}
+                    placeholder="Ask the owner for this"
+                    placeholderTextColor="#52525b"
+                    style={styles.textInput}
+                    autoCapitalize="none"
+                  />
+                </View>
+              </View>
+            )}
+
+            <TouchableOpacity
+              style={styles.loginButton}
+              onPress={authMode === 'login' ? handleLogin : handleRegister}
+              disabled={isLoggingIn}
+            >
               {isLoggingIn ? (
                 <ActivityIndicator color="#000" />
               ) : (
-                <Text style={styles.loginButtonText}>Connect & Log In</Text>
+                <Text style={styles.loginButtonText}>
+                  {authMode === 'login' ? 'Connect & Log In' : 'Create Account'}
+                </Text>
               )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.authModeToggle}
+              onPress={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}
+            >
+              <Text style={styles.authModeToggleText}>
+                {authMode === 'login' ? "Have an invite code? " : 'Already have an account? '}
+                <Text style={styles.authModeToggleLink}>
+                  {authMode === 'login' ? 'Create an account' : 'Sign in'}
+                </Text>
+              </Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
@@ -1258,6 +1325,18 @@ const styles = StyleSheet.create({
   loginButtonText: {
     color: '#000',
     fontSize: 15,
+    fontWeight: 'bold',
+  },
+  authModeToggle: {
+    marginTop: 20,
+    alignItems: 'center',
+  },
+  authModeToggleText: {
+    color: '#71717a',
+    fontSize: 13,
+  },
+  authModeToggleLink: {
+    color: '#22c55e',
     fontWeight: 'bold',
   },
   mainContainer: {
