@@ -15,6 +15,8 @@ import {
   Alert,
   Animated,
   Easing,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { createAudioPlayer, setAudioModeAsync, AudioPlayer, AudioStatus } from 'expo-audio';
 import * as SecureStore from 'expo-secure-store';
@@ -37,9 +39,10 @@ import {
   Link,
   Lock,
   User as UserIcon,
-  Globe,
   Radio,
   KeyRound,
+  Eye,
+  EyeOff,
 } from 'lucide-react-native';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -114,6 +117,7 @@ export default function App() {
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [inviteCode, setInviteCode] = useState('');
   const [token, setToken] = useState<string | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
@@ -148,6 +152,8 @@ export default function App() {
 
   const soundRef = useRef<AudioPlayer | null>(null);
   const progressWidthRef = useRef<number>(0);
+  const passwordInputRef = useRef<TextInput>(null);
+  const inviteCodeInputRef = useRef<TextInput>(null);
 
   // Refs that mirror state so callbacks always read current values
   const isLoopRef = useRef(isLoop);
@@ -605,106 +611,131 @@ export default function App() {
     return (
       <SafeAreaView style={styles.loginContainer}>
         <StatusBar barStyle="light-content" />
-        <ScrollView contentContainerStyle={styles.loginScroll}>
-          <View style={styles.loginCard}>
-            <View style={styles.logoContainer}>
-              <Music size={54} color="#22c55e" />
-              <Text style={styles.logoText}>Symphony</Text>
-              <Text style={styles.logoSubtext}>
-                {authMode === 'login' ? 'Private Music Player' : 'Create Your Account'}
-              </Text>
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>SERVER URL</Text>
-              <View style={styles.inputWrapper}>
-                <Globe size={18} color="#71717a" style={styles.inputIcon} />
-                <TextInput
-                  value={serverUrl}
-                  editable={false}
-                  placeholder="https://api.music.xisd.uz"
-                  placeholderTextColor="#52525b"
-                  style={styles.textInput}
-                  autoCapitalize="none"
-                />
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 0}
+        >
+          <ScrollView
+            contentContainerStyle={styles.loginScroll}
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={styles.loginCard}>
+              <View style={styles.logoContainer}>
+                <Music size={54} color="#22c55e" />
+                <Text style={styles.logoText}>Symphony</Text>
+                <Text style={styles.logoSubtext}>
+                  {authMode === 'login' ? 'Private Music Player' : 'Create Your Account'}
+                </Text>
               </View>
-            </View>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>USERNAME</Text>
-              <View style={styles.inputWrapper}>
-                <UserIcon size={18} color="#71717a" style={styles.inputIcon} />
-                <TextInput
-                  value={username}
-                  onChangeText={setUsername}
-                  placeholder="admin"
-                  placeholderTextColor="#52525b"
-                  style={styles.textInput}
-                  autoCapitalize="none"
-                />
-              </View>
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>PASSWORD</Text>
-              <View style={styles.inputWrapper}>
-                <Lock size={18} color="#71717a" style={styles.inputIcon} />
-                <TextInput
-                  value={password}
-                  onChangeText={setPassword}
-                  placeholder="••••••••"
-                  placeholderTextColor="#52525b"
-                  style={styles.textInput}
-                  secureTextEntry
-                  autoCapitalize="none"
-                />
-              </View>
-            </View>
-
-            {authMode === 'register' && (
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>INVITE CODE</Text>
+                <Text style={styles.inputLabel}>USERNAME</Text>
                 <View style={styles.inputWrapper}>
-                  <KeyRound size={18} color="#71717a" style={styles.inputIcon} />
+                  <UserIcon size={18} color="#71717a" style={styles.inputIcon} />
                   <TextInput
-                    value={inviteCode}
-                    onChangeText={setInviteCode}
-                    placeholder="Ask the owner for this"
+                    value={username}
+                    onChangeText={setUsername}
+                    placeholder="admin"
                     placeholderTextColor="#52525b"
                     style={styles.textInput}
                     autoCapitalize="none"
+                    autoCorrect={false}
+                    textContentType="username"
+                    autoComplete="username"
+                    returnKeyType="next"
+                    onSubmitEditing={() => passwordInputRef.current?.focus()}
+                    blurOnSubmit={false}
                   />
                 </View>
               </View>
-            )}
 
-            <TouchableOpacity
-              style={styles.loginButton}
-              onPress={authMode === 'login' ? handleLogin : handleRegister}
-              disabled={isLoggingIn}
-            >
-              {isLoggingIn ? (
-                <ActivityIndicator color="#000" />
-              ) : (
-                <Text style={styles.loginButtonText}>
-                  {authMode === 'login' ? 'Connect & Log In' : 'Create Account'}
-                </Text>
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>PASSWORD</Text>
+                <View style={styles.inputWrapper}>
+                  <Lock size={18} color="#71717a" style={styles.inputIcon} />
+                  <TextInput
+                    ref={passwordInputRef}
+                    value={password}
+                    onChangeText={setPassword}
+                    placeholder="••••••••"
+                    placeholderTextColor="#52525b"
+                    style={styles.textInput}
+                    secureTextEntry={!showPassword}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    textContentType="password"
+                    autoComplete="password"
+                    returnKeyType={authMode === 'register' ? 'next' : 'done'}
+                    onSubmitEditing={() =>
+                      authMode === 'register'
+                        ? inviteCodeInputRef.current?.focus()
+                        : handleLogin()
+                    }
+                    blurOnSubmit={authMode === 'login'}
+                  />
+                  <TouchableOpacity
+                    onPress={() => setShowPassword(!showPassword)}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  >
+                    {showPassword ? (
+                      <EyeOff size={18} color="#71717a" />
+                    ) : (
+                      <Eye size={18} color="#71717a" />
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {authMode === 'register' && (
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>INVITE CODE</Text>
+                  <View style={styles.inputWrapper}>
+                    <KeyRound size={18} color="#71717a" style={styles.inputIcon} />
+                    <TextInput
+                      ref={inviteCodeInputRef}
+                      value={inviteCode}
+                      onChangeText={setInviteCode}
+                      placeholder="Ask the owner for this"
+                      placeholderTextColor="#52525b"
+                      style={styles.textInput}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      returnKeyType="done"
+                      onSubmitEditing={() => handleRegister()}
+                    />
+                  </View>
+                </View>
               )}
-            </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.authModeToggle}
-              onPress={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}
-            >
-              <Text style={styles.authModeToggleText}>
-                {authMode === 'login' ? "Have an invite code? " : 'Already have an account? '}
-                <Text style={styles.authModeToggleLink}>
-                  {authMode === 'login' ? 'Create an account' : 'Sign in'}
+              <TouchableOpacity
+                style={styles.loginButton}
+                onPress={authMode === 'login' ? handleLogin : handleRegister}
+                disabled={isLoggingIn}
+              >
+                {isLoggingIn ? (
+                  <ActivityIndicator color="#000" />
+                ) : (
+                  <Text style={styles.loginButtonText}>
+                    {authMode === 'login' ? 'Connect & Log In' : 'Create Account'}
+                  </Text>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.authModeToggle}
+                onPress={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}
+              >
+                <Text style={styles.authModeToggleText}>
+                  {authMode === 'login' ? "Have an invite code? " : 'Already have an account? '}
+                  <Text style={styles.authModeToggleLink}>
+                    {authMode === 'login' ? 'Create an account' : 'Sign in'}
+                  </Text>
                 </Text>
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </ScrollView>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </SafeAreaView>
     );
   }
