@@ -3,20 +3,22 @@
 import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, Search, Heart, Upload } from 'lucide-react';
+import { Home, Radio, Search, Heart, History, Upload } from 'lucide-react';
 
 export default function MobileNav() {
   const pathname = usePathname();
 
   const tabs = [
     { name: 'Home', href: '/', icon: Home },
+    { name: 'Radio', href: '/radio', icon: Radio },
     { name: 'Search', href: '/search', icon: Search },
     { name: 'Liked', href: '/liked', icon: Heart },
+    { name: 'History', href: '/history', icon: History },
     { name: 'Upload', href: '/upload', icon: Upload },
   ];
 
   return (
-    <div className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-black/95 backdrop-blur-lg border-t border-border-dark flex items-center justify-around px-4 z-40 select-none">
+    <div className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-black/95 backdrop-blur-lg border-t border-border-dark flex items-center justify-around px-1 z-40 select-none">
       {tabs.map((tab) => {
         const Icon = tab.icon;
         const isActive = pathname === tab.href;
@@ -24,7 +26,7 @@ export default function MobileNav() {
           <Link
             key={tab.href}
             href={tab.href}
-            className="flex flex-col items-center justify-center gap-1 w-12 py-1"
+            className="flex flex-col items-center justify-center gap-1 flex-1 min-w-0 py-1"
           >
             <Icon
               className={`h-[22px] w-[22px] transition-colors ${
