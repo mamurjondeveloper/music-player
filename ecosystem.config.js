@@ -4,10 +4,11 @@ module.exports = {
       name: 'symphony-backend',
       cwd: './backend',
       script: 'dist/src/main.js',
+      // JWT_SECRET, DATABASE_URL and INVITE_CODE are intentionally NOT set here — they must
+      // live only in backend/.env on the server (git-ignored) so real secrets never end up
+      // committed to this file, which is tracked in git.
       env: {
         PORT: 4005,
-        DATABASE_URL: 'file:/var/www/music-player/backend/prisma/dev.db',
-        JWT_SECRET: 'super_secret_music_jwt_key_12345',
         NODE_ENV: 'production',
       },
     },
