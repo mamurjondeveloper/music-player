@@ -1,15 +1,14 @@
 import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { JwtService } from '@nestjs/jwt';
-import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class AuthService {
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
-    private configService: ConfigService,
   ) {}
 
   async login(username: string, pass: string) {
@@ -39,12 +38,12 @@ export class AuthService {
   }
 
   async register(username: string, pass: string, inviteCode: string) {
-    const expectedInviteCode = this.configService.get<string>('INVITE_CODE');
-    if (!expectedInviteCode) {
-      throw new UnauthorizedException('Registration is currently disabled');
-    }
-    if (inviteCode !== expectedInviteCode) {
+    const invite = await this.prisma.inviteCode.findUnique({ where: { code: inviteCode } });
+    if (!invite) {
       throw new UnauthorizedException('Invalid invite code');
+    }
+    if (invite.usedBy) {
+      throw new UnauthorizedException('This invite code has already been used');
     }
 
     const existing = await this.prisma.user.findUnique({ where: { username } });
@@ -57,6 +56,11 @@ export class AuthService {
       data: { username, passwordHash },
     });
 
+    await this.prisma.inviteCode.update({
+      where: { code: inviteCode },
+      data: { usedBy: user.id, usedAt: new Date() },
+    });
+
     const payload = { sub: user.id, username: user.username };
 
     return {
@@ -67,6 +71,29 @@ export class AuthService {
         avatarUrl: user.avatarUrl,
       },
     };
+  }
+
+  async generateInviteCode(userId: string) {
+    // 8 alphanumeric chars, easy to read aloud/type on a phone keyboard
+    let alnum = '';
+    while (alnum.length < 8) {
+      alnum += crypto.randomBytes(8).toString('base64url').replace(/[^a-zA-Z0-9]/g, '');
+    }
+    const code = alnum.slice(0, 8).toUpperCase();
+
+    const invite = await this.prisma.inviteCode.create({
+      data: { code, createdBy: userId },
+    });
+
+    return { code: invite.code };
+  }
+
+  async getMyInviteCodes(userId: string) {
+    return this.prisma.inviteCode.findMany({
+      where: { createdBy: userId },
+      orderBy: { createdAt: 'desc' },
+      select: { code: true, usedBy: true, createdAt: true, usedAt: true },
+    });
   }
 
   async validateUserById(id: string) {

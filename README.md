@@ -98,9 +98,8 @@ Follow these steps to configure your environment and run Symphony locally:
    DATABASE_URL="file:./dev.db"
    JWT_SECRET="<generate a long random string, e.g. `openssl rand -hex 32`>"
    PORT=4000
-   INVITE_CODE="<a code you share privately with people you want to let register>"
    ```
-   `JWT_SECRET` has no default fallback — the server refuses to start without it. `INVITE_CODE` gates the `/auth/register` page/screen; leave it unset to disable public registration entirely.
+   `JWT_SECRET` has no default fallback — the server refuses to start without it.
 
 3. **Install Dependencies**:
    Open a terminal and install dependencies for both applications:
@@ -125,7 +124,7 @@ The database migration seeds a default account you can use immediately:
 - **Username**: `admin`
 - **Password**: `password123`
 
-Additional accounts (for friends/family) are created via the **Register** page/screen, which requires the invite code set in `INVITE_CODE` (see [Getting Started](#-getting-started)) — there is no open public sign-up.
+Additional accounts (for friends/family) are created via the **Register** page/screen using a single-use invite code — any logged-in user can generate one for a friend (`POST /auth/invite-code`), there's no open public sign-up or admin-only static code.
 
 ---
 

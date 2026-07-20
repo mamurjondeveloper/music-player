@@ -24,4 +24,16 @@ export class AuthController {
   async getProfile(@CurrentUser() user: any) {
     return user;
   }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('invite-code')
+  async createInviteCode(@CurrentUser() user: any) {
+    return this.authService.generateInviteCode(user.id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('invite-code')
+  async listInviteCodes(@CurrentUser() user: any) {
+    return this.authService.getMyInviteCodes(user.id);
+  }
 }

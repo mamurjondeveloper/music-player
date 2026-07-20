@@ -22,6 +22,7 @@ import { createAudioPlayer, setAudioModeAsync, AudioPlayer, AudioStatus } from '
 import * as SecureStore from 'expo-secure-store';
 import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Clipboard from 'expo-clipboard';
 import axios from 'axios';
 import {
   Play,
@@ -43,6 +44,8 @@ import {
   KeyRound,
   Eye,
   EyeOff,
+  UserPlus,
+  Copy,
 } from 'lucide-react-native';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -139,6 +142,9 @@ export default function App() {
   const [isShuffle, setIsShuffle] = useState(false);
   const [isLoop, setIsLoop] = useState<'none' | 'one' | 'all'>('none');
   const [isPlayerModalVisible, setIsPlayerModalVisible] = useState(false);
+  const [isInviteModalVisible, setIsInviteModalVisible] = useState(false);
+  const [generatedInviteCode, setGeneratedInviteCode] = useState<string | null>(null);
+  const [isGeneratingInvite, setIsGeneratingInvite] = useState(false);
 
   const [isRadioMode, setIsRadioMode] = useState(false);
   const [radioSongs, setRadioSongs] = useState<Song[]>([]);
@@ -352,6 +358,27 @@ export default function App() {
       }
       setCurrentScreen('login');
     } catch {}
+  };
+
+  const handleOpenInvite = async () => {
+    setIsInviteModalVisible(true);
+    setGeneratedInviteCode(null);
+    setIsGeneratingInvite(true);
+    try {
+      const res = await getApi().post('/auth/invite-code');
+      setGeneratedInviteCode(res.data.code);
+    } catch {
+      Alert.alert('Error', 'Failed to generate invite code');
+      setIsInviteModalVisible(false);
+    } finally {
+      setIsGeneratingInvite(false);
+    }
+  };
+
+  const handleCopyInvite = async () => {
+    if (!generatedInviteCode) return;
+    await Clipboard.setStringAsync(generatedInviteCode);
+    Alert.alert('Copied', 'Invite code copied to clipboard');
   };
 
   const handleSongEndedFromCallback = useCallback(() => {
@@ -752,9 +779,14 @@ export default function App() {
             {currentScreen === 'upload' && 'Add Music'}
             {currentScreen === 'radio' && 'Radio'}
           </Text>
-          <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
-            <LogOut size={16} color="#ef4444" />
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <TouchableOpacity onPress={handleOpenInvite} style={styles.logoutButton}>
+              <UserPlus size={16} color="#22c55e" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
+              <LogOut size={16} color="#ef4444" />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <View style={{ flex: 1 }}>
@@ -1251,6 +1283,41 @@ export default function App() {
               </View>
             </SafeAreaView>
           )}
+        </Modal>
+
+        {/* INVITE A FRIEND MODAL */}
+        <Modal animationType="fade" transparent visible={isInviteModalVisible}>
+          <View style={styles.inviteOverlay}>
+            <View style={styles.inviteCard}>
+              <TouchableOpacity
+                style={styles.inviteCloseButton}
+                onPress={() => setIsInviteModalVisible(false)}
+              >
+                <ChevronDown size={22} color="#71717a" />
+              </TouchableOpacity>
+
+              <UserPlus size={32} color="#22c55e" style={{ marginBottom: 12 }} />
+              <Text style={styles.inviteTitle}>Invite a Friend</Text>
+
+              {isGeneratingInvite ? (
+                <ActivityIndicator color="#22c55e" style={{ marginVertical: 24 }} />
+              ) : generatedInviteCode ? (
+                <>
+                  <Text style={styles.inviteDescription}>
+                    Share this single-use code. They&apos;ll enter it on the Register screen.
+                  </Text>
+                  <View style={styles.inviteCodeRow}>
+                    <Text style={styles.inviteCodeText}>{generatedInviteCode}</Text>
+                    <TouchableOpacity onPress={handleCopyInvite} style={styles.inviteCopyButton}>
+                      <Copy size={18} color="#71717a" />
+                    </TouchableOpacity>
+                  </View>
+                </>
+              ) : (
+                <Text style={styles.inviteDescription}>Could not generate a code.</Text>
+              )}
+            </View>
+          </View>
         </Modal>
       </SafeAreaView>
     );
@@ -1797,6 +1864,64 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.15,
     shadowRadius: 10,
     elevation: 4,
+  },
+  inviteOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  inviteCard: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: '#18181b',
+    borderWidth: 1,
+    borderColor: '#27272a',
+    borderRadius: 24,
+    padding: 24,
+    alignItems: 'center',
+  },
+  inviteCloseButton: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    padding: 6,
+  },
+  inviteTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '900',
+    marginBottom: 8,
+  },
+  inviteDescription: {
+    color: '#a1a1aa',
+    fontSize: 12,
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: 16,
+  },
+  inviteCodeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#09090b',
+    borderWidth: 1,
+    borderColor: '#27272a',
+    borderRadius: 14,
+    paddingLeft: 18,
+    paddingRight: 10,
+    height: 52,
+    width: '100%',
+    justifyContent: 'space-between',
+  },
+  inviteCodeText: {
+    color: '#22c55e',
+    fontSize: 20,
+    fontWeight: '900',
+    letterSpacing: 3,
+  },
+  inviteCopyButton: {
+    padding: 8,
   },
   loopOneIndicator: {
     position: 'absolute',
