@@ -23,6 +23,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
+import * as ImagePicker from 'expo-image-picker';
 import axios from 'axios';
 import {
   Play,
@@ -46,6 +47,9 @@ import {
   EyeOff,
   UserPlus,
   Copy,
+  Camera,
+  CheckCircle2,
+  Clock,
 } from 'lucide-react-native';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -74,6 +78,19 @@ interface ImportItem {
   title: string;
   status: 'pending' | 'importing' | 'completed' | 'failed';
   error?: string;
+}
+
+interface UserInfo {
+  id: string;
+  username: string;
+  avatarUrl: string | null;
+}
+
+interface InviteCodeItem {
+  code: string;
+  usedBy: string | null;
+  createdAt: string;
+  usedAt: string | null;
 }
 
 const documentDir = FileSystem.documentDirectory || 'file:///data/user/0/com.xisd.music/files/';
@@ -114,7 +131,7 @@ async function cacheAudioInBackground(songId: string, remoteUrl: string) {
 
 export default function App() {
   const [hasError, setHasError] = useState(false);
-  const [currentScreen, setCurrentScreen] = useState<'login' | 'home' | 'playlists' | 'upload' | 'radio'>('login');
+  const [currentScreen, setCurrentScreen] = useState<'login' | 'home' | 'playlists' | 'upload' | 'radio' | 'profile'>('login');
 
   const [serverUrl] = useState('https://api.music.xisd.uz');
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
@@ -142,8 +159,18 @@ export default function App() {
   const [isShuffle, setIsShuffle] = useState(false);
   const [isLoop, setIsLoop] = useState<'none' | 'one' | 'all'>('none');
   const [isPlayerModalVisible, setIsPlayerModalVisible] = useState(false);
-  const [isInviteModalVisible, setIsInviteModalVisible] = useState(false);
-  const [generatedInviteCode, setGeneratedInviteCode] = useState<string | null>(null);
+
+  // Profile screen
+  const [currentUser, setCurrentUser] = useState<UserInfo | null>(null);
+  const [profileUsername, setProfileUsername] = useState('');
+  const [isSavingUsername, setIsSavingUsername] = useState(false);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [currentPasswordInput, setCurrentPasswordInput] = useState('');
+  const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
+  const [isSavingPassword, setIsSavingPassword] = useState(false);
+  const [inviteCodes, setInviteCodes] = useState<InviteCodeItem[]>([]);
+  const [isLoadingInviteCodes, setIsLoadingInviteCodes] = useState(false);
   const [isGeneratingInvite, setIsGeneratingInvite] = useState(false);
 
   const [isRadioMode, setIsRadioMode] = useState(false);
@@ -214,6 +241,10 @@ export default function App() {
         if (savedToken) {
           setToken(savedToken);
           setCurrentScreen('home');
+          axios
+            .get(`${serverUrl}/auth/me`, { headers: { Authorization: `Bearer ${savedToken}` } })
+            .then((res) => setCurrentUser(res.data))
+            .catch(() => {});
         }
       } catch (err) {
         console.warn('Failed to restore session:', err);
@@ -222,6 +253,7 @@ export default function App() {
       }
     };
     restoreSession();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -292,6 +324,14 @@ export default function App() {
     fetchRadioSongs();
   }, [currentScreen, token, getApi]);
 
+  // Sync editable username field and load invite codes when the Profile screen opens
+  useEffect(() => {
+    if (currentScreen !== 'profile') return;
+    setProfileUsername(currentUser?.username || '');
+    fetchInviteCodes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentScreen]);
+
   const handleLogin = async () => {
     if (!username || !password || !serverUrl) {
       Alert.alert('Error', 'Please fill in all fields');
@@ -309,6 +349,7 @@ export default function App() {
       await AsyncStorage.setItem('symphony_server_url', serverUrl);
 
       setToken(jwtToken);
+      setCurrentUser(res.data.user);
       setCurrentScreen('home');
     } catch (err: any) {
       const msg = err.response?.data?.message || 'Login failed. Check server URL and credentials.';
@@ -336,6 +377,7 @@ export default function App() {
       await AsyncStorage.setItem('symphony_server_url', serverUrl);
 
       setToken(jwtToken);
+      setCurrentUser(res.data.user);
       setCurrentScreen('home');
     } catch (err: any) {
       const msg = err.response?.data?.message || 'Registration failed. Check your details.';
@@ -349,6 +391,7 @@ export default function App() {
     try {
       await SecureStore.deleteItemAsync('symphony_jwt_token');
       setToken(null);
+      setCurrentUser(null);
       setCurrentSong(null);
       setIsPlaying(false);
       setIsRadioMode(false);
@@ -360,25 +403,108 @@ export default function App() {
     } catch {}
   };
 
-  const handleOpenInvite = async () => {
-    setIsInviteModalVisible(true);
-    setGeneratedInviteCode(null);
+  const fetchInviteCodes = useCallback(async () => {
+    setIsLoadingInviteCodes(true);
+    try {
+      const res = await getApi().get('/auth/invite-code');
+      setInviteCodes(res.data);
+    } catch {
+      // Non-critical - leave list as-is
+    } finally {
+      setIsLoadingInviteCodes(false);
+    }
+  }, [getApi]);
+
+  const handleGenerateInvite = async () => {
     setIsGeneratingInvite(true);
     try {
       const res = await getApi().post('/auth/invite-code');
-      setGeneratedInviteCode(res.data.code);
+      setInviteCodes((prev) => [
+        { code: res.data.code, usedBy: null, usedAt: null, createdAt: new Date().toISOString() },
+        ...prev,
+      ]);
     } catch {
       Alert.alert('Error', 'Failed to generate invite code');
-      setIsInviteModalVisible(false);
     } finally {
       setIsGeneratingInvite(false);
     }
   };
 
-  const handleCopyInvite = async () => {
-    if (!generatedInviteCode) return;
-    await Clipboard.setStringAsync(generatedInviteCode);
+  const handleCopyInviteCode = async (code: string) => {
+    await Clipboard.setStringAsync(code);
     Alert.alert('Copied', 'Invite code copied to clipboard');
+  };
+
+  const handlePickAvatar = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permission needed', 'Please allow photo library access to change your avatar.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+    if (result.canceled || !result.assets?.[0]) return;
+
+    const asset = result.assets[0];
+    const formData = new FormData();
+    formData.append('file', {
+      uri: asset.uri,
+      name: asset.fileName || 'avatar.jpg',
+      type: asset.mimeType || 'image/jpeg',
+    } as any);
+
+    setIsUploadingAvatar(true);
+    try {
+      const res = await getApi().post('/auth/avatar', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setCurrentUser(res.data);
+    } catch (err: any) {
+      Alert.alert('Error', err.response?.data?.message || 'Failed to upload photo');
+    } finally {
+      setIsUploadingAvatar(false);
+    }
+  };
+
+  const handleSaveUsername = async () => {
+    if (!profileUsername.trim() || profileUsername === currentUser?.username) return;
+    setIsSavingUsername(true);
+    try {
+      const res = await getApi().patch('/auth/profile', { username: profileUsername.trim() });
+      setCurrentUser(res.data);
+      Alert.alert('Saved', 'Username updated!');
+    } catch (err: any) {
+      Alert.alert('Error', err.response?.data?.message || 'Failed to update username');
+    } finally {
+      setIsSavingUsername(false);
+    }
+  };
+
+  const handleChangePassword = async () => {
+    if (newPasswordInput !== confirmPasswordInput) {
+      Alert.alert('Error', 'New passwords do not match');
+      return;
+    }
+    setIsSavingPassword(true);
+    try {
+      await getApi().post('/auth/change-password', {
+        currentPassword: currentPasswordInput,
+        newPassword: newPasswordInput,
+      });
+      Alert.alert('Success', 'Password changed successfully!');
+      setCurrentPasswordInput('');
+      setNewPasswordInput('');
+      setConfirmPasswordInput('');
+    } catch (err: any) {
+      Alert.alert('Error', err.response?.data?.message || 'Failed to change password');
+    } finally {
+      setIsSavingPassword(false);
+    }
   };
 
   const handleSongEndedFromCallback = useCallback(() => {
@@ -778,9 +904,10 @@ export default function App() {
             {currentScreen === 'playlists' && (activePlaylist ? activePlaylist.name : 'Playlists')}
             {currentScreen === 'upload' && 'Add Music'}
             {currentScreen === 'radio' && 'Radio'}
+            {currentScreen === 'profile' && 'Profile'}
           </Text>
           <View style={{ flexDirection: 'row', gap: 8 }}>
-            <TouchableOpacity onPress={handleOpenInvite} style={styles.logoutButton}>
+            <TouchableOpacity onPress={() => setCurrentScreen('profile')} style={styles.logoutButton}>
               <UserPlus size={16} color="#22c55e" />
             </TouchableOpacity>
             <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
@@ -1125,6 +1252,174 @@ export default function App() {
               )}
             </ScrollView>
           )}
+
+          {/* PROFILE SCREEN */}
+          {currentScreen === 'profile' && !currentUser && (
+            <View style={[styles.loadingContainer, { backgroundColor: 'transparent' }]}>
+              <ActivityIndicator size="large" color="#22c55e" />
+            </View>
+          )}
+          {currentScreen === 'profile' && currentUser && (
+            <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+              <View style={styles.profileCard}>
+                <TouchableOpacity onPress={handlePickAvatar} style={styles.profileAvatarWrapper}>
+                  {currentUser.avatarUrl ? (
+                    <Image
+                      source={{ uri: `${serverUrl}${currentUser.avatarUrl}` }}
+                      style={styles.profileAvatarImage as any}
+                    />
+                  ) : (
+                    <View style={styles.profileAvatarPlaceholder}>
+                      <Text style={styles.profileAvatarInitials}>
+                        {currentUser.username.slice(0, 2).toUpperCase()}
+                      </Text>
+                    </View>
+                  )}
+                  <View style={styles.profileAvatarOverlay}>
+                    {isUploadingAvatar ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <Camera size={18} color="#fff" />
+                    )}
+                  </View>
+                </TouchableOpacity>
+                <Text style={styles.profileUsernameLabel}>{currentUser.username}</Text>
+                <Text style={styles.profileHint}>Tap your photo to change it</Text>
+              </View>
+
+              <View style={styles.profileCard}>
+                <Text style={styles.profileSectionTitle}>Username</Text>
+                <View style={styles.inputWrapper}>
+                  <UserIcon size={18} color="#71717a" style={styles.inputIcon} />
+                  <TextInput
+                    value={profileUsername}
+                    onChangeText={setProfileUsername}
+                    placeholderTextColor="#52525b"
+                    style={styles.textInput}
+                    autoCapitalize="none"
+                  />
+                </View>
+                <TouchableOpacity
+                  style={[
+                    styles.loginButton,
+                    { marginTop: 14 },
+                    (!profileUsername.trim() || profileUsername === currentUser.username) && { opacity: 0.5 },
+                  ]}
+                  onPress={handleSaveUsername}
+                  disabled={isSavingUsername || !profileUsername.trim() || profileUsername === currentUser.username}
+                >
+                  {isSavingUsername ? (
+                    <ActivityIndicator color="#000" />
+                  ) : (
+                    <Text style={styles.loginButtonText}>Save Username</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.profileCard}>
+                <Text style={styles.profileSectionTitle}>Change Password</Text>
+                <View style={[styles.inputWrapper, { marginBottom: 12 }]}>
+                  <Lock size={18} color="#71717a" style={styles.inputIcon} />
+                  <TextInput
+                    value={currentPasswordInput}
+                    onChangeText={setCurrentPasswordInput}
+                    placeholder="Current password"
+                    placeholderTextColor="#52525b"
+                    style={styles.textInput}
+                    secureTextEntry
+                    autoCapitalize="none"
+                  />
+                </View>
+                <View style={[styles.inputWrapper, { marginBottom: 12 }]}>
+                  <Lock size={18} color="#71717a" style={styles.inputIcon} />
+                  <TextInput
+                    value={newPasswordInput}
+                    onChangeText={setNewPasswordInput}
+                    placeholder="New password"
+                    placeholderTextColor="#52525b"
+                    style={styles.textInput}
+                    secureTextEntry
+                    autoCapitalize="none"
+                  />
+                </View>
+                <View style={styles.inputWrapper}>
+                  <Lock size={18} color="#71717a" style={styles.inputIcon} />
+                  <TextInput
+                    value={confirmPasswordInput}
+                    onChangeText={setConfirmPasswordInput}
+                    placeholder="Confirm new password"
+                    placeholderTextColor="#52525b"
+                    style={styles.textInput}
+                    secureTextEntry
+                    autoCapitalize="none"
+                  />
+                </View>
+                <TouchableOpacity
+                  style={[
+                    styles.loginButton,
+                    { marginTop: 14 },
+                    (!currentPasswordInput || !newPasswordInput || !confirmPasswordInput) && { opacity: 0.5 },
+                  ]}
+                  onPress={handleChangePassword}
+                  disabled={isSavingPassword || !currentPasswordInput || !newPasswordInput || !confirmPasswordInput}
+                >
+                  {isSavingPassword ? (
+                    <ActivityIndicator color="#000" />
+                  ) : (
+                    <Text style={styles.loginButtonText}>Update Password</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.profileCard}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <Text style={styles.profileSectionTitle}>Invite Friends</Text>
+                  <TouchableOpacity
+                    style={styles.profileGenerateButton}
+                    onPress={handleGenerateInvite}
+                    disabled={isGeneratingInvite}
+                  >
+                    {isGeneratingInvite ? (
+                      <ActivityIndicator color="#000" size="small" />
+                    ) : (
+                      <Text style={styles.profileGenerateButtonText}>Generate</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+                <Text style={styles.profileHint}>
+                  Each code is single-use. Share one with a friend to let them register.
+                </Text>
+
+                {isLoadingInviteCodes ? (
+                  <ActivityIndicator color="#22c55e" style={{ marginTop: 16 }} />
+                ) : inviteCodes.length === 0 ? (
+                  <Text style={[styles.emptyText, { marginTop: 12 }]}>No invite codes yet</Text>
+                ) : (
+                  <View style={{ marginTop: 12, gap: 8 }}>
+                    {inviteCodes.map((invite) => (
+                      <View key={invite.code} style={styles.inviteRow}>
+                        <Text style={styles.inviteRowCode}>{invite.code}</Text>
+                        {invite.usedBy ? (
+                          <View style={styles.inviteRowStatus}>
+                            <CheckCircle2 size={14} color="#71717a" />
+                            <Text style={styles.inviteRowStatusText}>Used</Text>
+                          </View>
+                        ) : (
+                          <View style={styles.inviteRowStatus}>
+                            <Clock size={14} color="#22c55e" />
+                            <Text style={[styles.inviteRowStatusText, { color: '#22c55e' }]}>Unused</Text>
+                            <TouchableOpacity onPress={() => handleCopyInviteCode(invite.code)} style={{ marginLeft: 8 }}>
+                              <Copy size={14} color="#71717a" />
+                            </TouchableOpacity>
+                          </View>
+                        )}
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </View>
+            </ScrollView>
+          )}
         </View>
 
         {/* MINI PLAYER */}
@@ -1283,41 +1578,6 @@ export default function App() {
               </View>
             </SafeAreaView>
           )}
-        </Modal>
-
-        {/* INVITE A FRIEND MODAL */}
-        <Modal animationType="fade" transparent visible={isInviteModalVisible}>
-          <View style={styles.inviteOverlay}>
-            <View style={styles.inviteCard}>
-              <TouchableOpacity
-                style={styles.inviteCloseButton}
-                onPress={() => setIsInviteModalVisible(false)}
-              >
-                <ChevronDown size={22} color="#71717a" />
-              </TouchableOpacity>
-
-              <UserPlus size={32} color="#22c55e" style={{ marginBottom: 12 }} />
-              <Text style={styles.inviteTitle}>Invite a Friend</Text>
-
-              {isGeneratingInvite ? (
-                <ActivityIndicator color="#22c55e" style={{ marginVertical: 24 }} />
-              ) : generatedInviteCode ? (
-                <>
-                  <Text style={styles.inviteDescription}>
-                    Share this single-use code. They&apos;ll enter it on the Register screen.
-                  </Text>
-                  <View style={styles.inviteCodeRow}>
-                    <Text style={styles.inviteCodeText}>{generatedInviteCode}</Text>
-                    <TouchableOpacity onPress={handleCopyInvite} style={styles.inviteCopyButton}>
-                      <Copy size={18} color="#71717a" />
-                    </TouchableOpacity>
-                  </View>
-                </>
-              ) : (
-                <Text style={styles.inviteDescription}>Could not generate a code.</Text>
-              )}
-            </View>
-          </View>
         </Modal>
       </SafeAreaView>
     );
@@ -1865,63 +2125,105 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 4,
   },
-  inviteOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.75)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  inviteCard: {
-    width: '100%',
-    maxWidth: 340,
+  profileCard: {
     backgroundColor: '#18181b',
     borderWidth: 1,
     borderColor: '#27272a',
     borderRadius: 24,
-    padding: 24,
+    padding: 20,
+    marginBottom: 16,
     alignItems: 'center',
   },
-  inviteCloseButton: {
-    position: 'absolute',
-    top: 12,
-    right: 12,
-    padding: 6,
+  profileAvatarWrapper: {
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    marginBottom: 12,
+    overflow: 'hidden',
+    position: 'relative',
   },
-  inviteTitle: {
-    color: '#fff',
-    fontSize: 18,
+  profileAvatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+  profileAvatarPlaceholder: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'rgba(34,197,94,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileAvatarInitials: {
+    color: '#22c55e',
+    fontSize: 26,
     fontWeight: '900',
-    marginBottom: 8,
   },
-  inviteDescription: {
-    color: '#a1a1aa',
-    fontSize: 12,
+  profileAvatarOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileUsernameLabel: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  profileHint: {
+    color: '#71717a',
+    fontSize: 11,
+    marginTop: 4,
     textAlign: 'center',
-    lineHeight: 18,
-    marginBottom: 16,
   },
-  inviteCodeRow: {
+  profileSectionTitle: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
+    alignSelf: 'flex-start',
+    marginBottom: 12,
+  },
+  profileGenerateButton: {
+    backgroundColor: '#22c55e',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+  profileGenerateButtonText: {
+    color: '#000',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  inviteRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     backgroundColor: '#09090b',
     borderWidth: 1,
     borderColor: '#27272a',
-    borderRadius: 14,
-    paddingLeft: 18,
-    paddingRight: 10,
-    height: 52,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     width: '100%',
-    justifyContent: 'space-between',
   },
-  inviteCodeText: {
-    color: '#22c55e',
-    fontSize: 20,
-    fontWeight: '900',
-    letterSpacing: 3,
+  inviteRowCode: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: 'bold',
+    letterSpacing: 1.5,
   },
-  inviteCopyButton: {
-    padding: 8,
+  inviteRowStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  inviteRowStatusText: {
+    color: '#71717a',
+    fontSize: 11,
+    fontWeight: '600',
   },
   loopOneIndicator: {
     position: 'absolute',

@@ -30,6 +30,12 @@
         {
           "enableBackgroundPlayback": true
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Symphony accesses your photos so you can set a profile picture."
+        }
       ]
     ]
   }
