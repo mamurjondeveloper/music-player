@@ -88,7 +88,9 @@ export default function BottomPlayer() {
       {/* ========================================== */}
       <div
         onClick={() => !isExpanded && setIsExpanded(true)}
-        className="fixed bottom-16 md:bottom-0 left-0 right-0 h-20 md:h-24 bg-black/90 backdrop-blur-xl border-t border-border-dark flex items-center justify-between px-4 md:px-8 z-30 select-none cursor-pointer md:cursor-default"
+        className={`fixed bottom-16 md:bottom-0 left-0 md:left-64 right-0 h-20 md:h-24 bg-black/90 backdrop-blur-xl border-t border-border-dark flex items-center justify-between px-4 md:px-8 z-30 select-none cursor-pointer md:cursor-default transition-[right] duration-200 ${
+          isQueueOpen ? 'md:right-80' : 'md:right-0'
+        }`}
       >
         {/* Left Section: Song details */}
         <div className="flex items-center gap-3 w-1/3 min-w-0">

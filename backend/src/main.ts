@@ -45,6 +45,10 @@ async function bootstrap() {
   if (!fs.existsSync(coversDir)) {
     fs.mkdirSync(coversDir, { recursive: true });
   }
+  const avatarsDir = join(uploadsDir, 'avatars');
+  if (!fs.existsSync(avatarsDir)) {
+    fs.mkdirSync(avatarsDir, { recursive: true });
+  }
 
   // Serve the uploads folder statically
   app.useStaticAssets(uploadsDir, {

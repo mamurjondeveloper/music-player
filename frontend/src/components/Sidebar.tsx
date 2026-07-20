@@ -4,7 +4,6 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
-import { useToastStore } from '@/store/toastStore';
 import { motion } from 'framer-motion';
 import {
   Home,
@@ -18,11 +17,10 @@ import {
   ChevronRight,
   FolderHeart,
   Radio,
-  UserPlus,
-  Copy,
 } from 'lucide-react';
 import api from '@/services/api';
-import { Modal } from '@/components/ui/Modal';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
 interface Playlist {
   id: string;
@@ -32,11 +30,7 @@ interface Playlist {
 export default function Sidebar() {
   const pathname = usePathname();
   const { user, logout } = useAuthStore();
-  const showToast = useToastStore((state) => state.showToast);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
-  const [isInviteOpen, setIsInviteOpen] = useState(false);
-  const [inviteCode, setInviteCode] = useState<string | null>(null);
-  const [isGeneratingInvite, setIsGeneratingInvite] = useState(false);
 
   useEffect(() => {
     const fetchPlaylists = async () => {
@@ -60,31 +54,6 @@ export default function Sidebar() {
     { name: 'History', href: '/history', icon: History },
     { name: 'Upload Music', href: '/upload', icon: Upload },
   ];
-
-  const handleOpenInvite = async () => {
-    setIsInviteOpen(true);
-    setInviteCode(null);
-    setIsGeneratingInvite(true);
-    try {
-      const res = await api.post('/auth/invite-code');
-      setInviteCode(res.data.code);
-    } catch (err) {
-      showToast('Failed to generate invite code', 'error');
-      setIsInviteOpen(false);
-    } finally {
-      setIsGeneratingInvite(false);
-    }
-  };
-
-  const handleCopyInvite = async () => {
-    if (!inviteCode) return;
-    try {
-      await navigator.clipboard.writeText(inviteCode);
-      showToast('Invite code copied!', 'success');
-    } catch {
-      showToast('Could not copy — select and copy manually', 'error');
-    }
-  };
 
   const handleCreatePlaylist = async () => {
     try {
@@ -175,59 +144,31 @@ export default function Sidebar() {
       {/* User Session Info / Profile */}
       {user && (
         <div className="border-t border-border-dark pt-4 mt-4 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="h-9 w-9 rounded-full bg-primary/20 flex items-center justify-center border border-primary/20 shrink-0 text-sm font-bold text-primary">
-              {user.username.slice(0, 2).toUpperCase()}
+          <Link href="/profile" className="flex items-center gap-3 min-w-0 group">
+            <div className="h-9 w-9 rounded-full bg-primary/20 flex items-center justify-center border border-primary/20 shrink-0 text-sm font-bold text-primary overflow-hidden">
+              {user.avatarUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={`${API_URL}${user.avatarUrl}`} alt={user.username} className="h-full w-full object-cover" />
+              ) : (
+                user.username.slice(0, 2).toUpperCase()
+              )}
             </div>
             <div className="min-w-0">
-              <div className="text-sm font-semibold text-white truncate">{user.username}</div>
-              <div className="text-xs text-gray-400 truncate">Friend Session</div>
+              <div className="text-sm font-semibold text-white truncate group-hover:text-primary transition-colors">
+                {user.username}
+              </div>
+              <div className="text-xs text-gray-400 truncate">View Profile</div>
             </div>
-          </div>
-          <div className="flex items-center gap-1 shrink-0">
-            <button
-              onClick={handleOpenInvite}
-              className="p-2 rounded-xl text-gray-500 hover:text-primary hover:bg-primary/10 transition-all cursor-pointer"
-              title="Invite a friend"
-            >
-              <UserPlus className="h-5 w-5" />
-            </button>
-            <button
-              onClick={logout}
-              className="p-2 rounded-xl text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer"
-              title="Log Out"
-            >
-              <LogOut className="h-5 w-5" />
-            </button>
-          </div>
+          </Link>
+          <button
+            onClick={logout}
+            className="p-2 rounded-xl text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer shrink-0"
+            title="Log Out"
+          >
+            <LogOut className="h-5 w-5" />
+          </button>
         </div>
       )}
-
-      <Modal isOpen={isInviteOpen} onClose={() => setIsInviteOpen(false)} title="Invite a Friend">
-        {isGeneratingInvite ? (
-          <div className="py-6 text-center text-sm text-gray-400">Generating code...</div>
-        ) : inviteCode ? (
-          <div className="space-y-4">
-            <p className="text-sm text-gray-400">
-              Share this single-use code with a friend. They&apos;ll enter it on the Register page to create their account.
-            </p>
-            <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-2xl px-4 py-3">
-              <span className="flex-1 font-mono text-xl font-bold tracking-widest text-primary select-all">
-                {inviteCode}
-              </span>
-              <button
-                onClick={handleCopyInvite}
-                className="p-2 rounded-xl text-gray-400 hover:text-white hover:bg-white/10 transition-all cursor-pointer"
-                title="Copy code"
-              >
-                <Copy className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="py-6 text-center text-sm text-red-400">Could not generate a code. Try again.</div>
-        )}
-      </Modal>
     </div>
   );
 }

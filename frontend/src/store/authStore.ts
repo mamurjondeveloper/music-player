@@ -18,6 +18,7 @@ interface AuthState {
   register: (username: string, password: string, inviteCode: string) => Promise<boolean>;
   logout: () => void;
   initialize: () => Promise<void>;
+  updateUser: (user: User) => void;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -83,6 +84,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       error: null,
     });
   },
+
+  updateUser: (user) => set({ user }),
 
   initialize: async () => {
     if (get().isInitialized) return;

@@ -1,8 +1,14 @@
-import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
+import * as fs from 'fs';
+import * as path from 'path';
 
 @Injectable()
 export class AuthService {
@@ -26,7 +32,7 @@ export class AuthService {
     }
 
     const payload = { sub: user.id, username: user.username };
-    
+
     return {
       access_token: this.jwtService.sign(payload),
       user: {
@@ -38,7 +44,9 @@ export class AuthService {
   }
 
   async register(username: string, pass: string, inviteCode: string) {
-    const invite = await this.prisma.inviteCode.findUnique({ where: { code: inviteCode } });
+    const invite = await this.prisma.inviteCode.findUnique({
+      where: { code: inviteCode },
+    });
     if (!invite) {
       throw new UnauthorizedException('Invalid invite code');
     }
@@ -77,7 +85,10 @@ export class AuthService {
     // 8 alphanumeric chars, easy to read aloud/type on a phone keyboard
     let alnum = '';
     while (alnum.length < 8) {
-      alnum += crypto.randomBytes(8).toString('base64url').replace(/[^a-zA-Z0-9]/g, '');
+      alnum += crypto
+        .randomBytes(8)
+        .toString('base64url')
+        .replace(/[^a-zA-Z0-9]/g, '');
     }
     const code = alnum.slice(0, 8).toUpperCase();
 
@@ -94,6 +105,80 @@ export class AuthService {
       orderBy: { createdAt: 'desc' },
       select: { code: true, usedBy: true, createdAt: true, usedAt: true },
     });
+  }
+
+  async updateProfile(userId: string, username?: string) {
+    if (username) {
+      const existing = await this.prisma.user.findUnique({
+        where: { username },
+      });
+      if (existing && existing.id !== userId) {
+        throw new ConflictException('Username is already taken');
+      }
+    }
+
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: username ? { username } : {},
+    });
+
+    return { id: user.id, username: user.username, avatarUrl: user.avatarUrl };
+  }
+
+  async updateAvatar(userId: string, file: Express.Multer.File) {
+    const ext = path.extname(file.originalname) || '.jpg';
+    const filename = `${userId}-${Date.now()}${ext}`;
+    const avatarPath = path.join(process.cwd(), 'uploads/avatars', filename);
+    fs.writeFileSync(avatarPath, file.buffer);
+
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    // Clean up the previous avatar file, if any, now that the new one is saved
+    if (user?.avatarUrl) {
+      const oldPath = path.join(process.cwd(), user.avatarUrl);
+      if (fs.existsSync(oldPath)) {
+        try {
+          fs.unlinkSync(oldPath);
+        } catch (e: any) {
+          console.warn('Could not delete old avatar file:', e.message);
+        }
+      }
+    }
+
+    const avatarUrl = `/uploads/avatars/${filename}`;
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: { avatarUrl },
+    });
+
+    return {
+      id: updated.id,
+      username: updated.username,
+      avatarUrl: updated.avatarUrl,
+    };
+  }
+
+  async changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+  ) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new UnauthorizedException();
+    }
+
+    const isMatch = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!isMatch) {
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash },
+    });
+
+    return { success: true };
   }
 
   async validateUserById(id: string) {
