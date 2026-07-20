@@ -16,9 +16,9 @@ import {
   Animated,
   Easing,
 } from 'react-native';
-import { Audio } from 'expo-av';
+import { createAudioPlayer, setAudioModeAsync, AudioPlayer, AudioStatus } from 'expo-audio';
 import * as SecureStore from 'expo-secure-store';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import {
@@ -143,7 +143,7 @@ export default function App() {
   const [isImporting, setIsImporting] = useState(false);
   const [importQueue, setImportQueue] = useState<ImportItem[]>([]);
 
-  const soundRef = useRef<Audio.Sound | null>(null);
+  const soundRef = useRef<AudioPlayer | null>(null);
   const progressWidthRef = useRef<number>(0);
 
   // Refs that mirror state so callbacks always read current values
@@ -212,11 +212,11 @@ export default function App() {
   useEffect(() => {
     const setupAudio = async () => {
       try {
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: false,
-          staysActiveInBackground: true,
-          playsInSilentModeIOS: true,
-          playThroughEarpieceAndroid: false,
+        await setAudioModeAsync({
+          allowsRecording: false,
+          shouldPlayInBackground: true,
+          playsInSilentMode: true,
+          interruptionMode: 'duckOthers',
         });
       } catch (err) {
         console.warn('Failed to set audio mode:', err);
@@ -311,7 +311,7 @@ export default function App() {
       setIsPlaying(false);
       setIsRadioMode(false);
       if (soundRef.current) {
-        await soundRef.current.unloadAsync();
+        soundRef.current.remove();
         soundRef.current = null;
       }
       setCurrentScreen('login');
@@ -326,7 +326,7 @@ export default function App() {
     const radioMode = isRadioModeRef.current;
 
     if (loop === 'one') {
-      soundRef.current?.setStatusAsync({ positionMillis: 0, shouldPlay: true });
+      soundRef.current?.seekTo(0).then(() => soundRef.current?.play());
       return;
     }
 
@@ -358,15 +358,15 @@ export default function App() {
     }
   }, []);
 
-  const onPlaybackStatusUpdate = useCallback((status: any) => {
+  const onPlaybackStatusUpdate = useCallback((status: AudioStatus) => {
     if (!status.isLoaded) return;
 
-    setCurrentTime(status.positionMillis / 1000);
-    if (status.durationMillis) {
-      setDuration(status.durationMillis / 1000);
+    setCurrentTime(status.currentTime);
+    if (status.duration) {
+      setDuration(status.duration);
     }
 
-    setIsPlaying(status.isPlaying);
+    setIsPlaying(status.playing);
 
     if (status.didJustFinish) {
       handleSongEndedFromCallback();
@@ -376,7 +376,7 @@ export default function App() {
   const playSongInternal = async (song: Song, contextQueue: Song[]) => {
     try {
       if (soundRef.current) {
-        await soundRef.current.unloadAsync();
+        soundRef.current.remove();
         soundRef.current = null;
       }
 
@@ -386,13 +386,11 @@ export default function App() {
       const remoteUri = `${serverUrl}${song.audioUrl}`;
       const audioUri = await getCachedAudioUri(song.id, remoteUri);
 
-      const { sound } = await Audio.Sound.createAsync(
-        { uri: audioUri },
-        { shouldPlay: true },
-        onPlaybackStatusUpdate
-      );
+      const player = createAudioPlayer({ uri: audioUri });
+      player.addListener('playbackStatusUpdate', onPlaybackStatusUpdate);
+      player.play();
 
-      soundRef.current = sound;
+      soundRef.current = player;
       setCurrentSong(song);
       setIsPlaying(true);
       setDuration(song.duration);
@@ -430,10 +428,10 @@ export default function App() {
   const togglePlay = async () => {
     if (!soundRef.current) return;
     if (isPlaying) {
-      await soundRef.current.pauseAsync();
+      soundRef.current.pause();
       setIsPlaying(false);
     } else {
-      await soundRef.current.playAsync();
+      soundRef.current.play();
       setIsPlaying(true);
     }
   };
@@ -464,7 +462,7 @@ export default function App() {
     if (queue.length === 0 || !currentSong) return;
 
     if (currentTime > 3) {
-      await soundRef.current?.setStatusAsync({ positionMillis: 0 });
+      await soundRef.current?.seekTo(0);
       return;
     }
 
@@ -484,7 +482,7 @@ export default function App() {
     const { locationX } = event.nativeEvent;
     const percent = locationX / progressWidthRef.current;
     const seekTime = Math.max(0, Math.min(duration, percent * duration));
-    await soundRef.current.setStatusAsync({ positionMillis: seekTime * 1000 });
+    await soundRef.current.seekTo(seekTime);
   };
 
   const startRadio = async () => {

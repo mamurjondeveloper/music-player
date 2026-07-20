@@ -26,9 +26,9 @@
     "plugins": [
       "expo-secure-store",
       [
-        "expo-av",
+        "expo-audio",
         {
-          "microphonePermission": false
+          "enableBackgroundPlayback": true
         }
       ]
     ]

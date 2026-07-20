@@ -1,12 +1,29 @@
 # 🎵 Symphony — Premium Private Music Streaming Player
 
-Symphony is a modern, lightweight, and premium private music player web application designed for personal use and sharing with close friends. It features a stunning, dark-by-default glassmorphic interface inspired by Spotify and Apple Music. Built with high performance, strict TypeScript type safety, and a simple local SQLite database, it requires no heavy container orchestration (Docker/Redis).
+<p align="left">
+  <img alt="Build Android APK" src="https://github.com/mamurjondeveloper/music-player/actions/workflows/build-apk.yml/badge.svg" />
+  <img alt="Next.js" src="https://img.shields.io/badge/Next.js-15-black?logo=next.js" />
+  <img alt="NestJS" src="https://img.shields.io/badge/NestJS-11-e0234e?logo=nestjs" />
+  <img alt="Expo" src="https://img.shields.io/badge/Expo-SDK%2057-000020?logo=expo" />
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript" />
+</p>
+
+Symphony is a modern, lightweight, and premium private music player designed for personal use and sharing with close friends. It ships as **three coordinated apps** — a Next.js web client, a NestJS API, and a native Android/iOS app built with Expo — sharing one SQLite-backed library. It features a stunning, dark-by-default glassmorphic interface inspired by Spotify and Apple Music, with no heavy container orchestration (Docker/Redis) required.
+
+## 📋 Contents
+
+- [System Architecture](#️-system-architecture)
+- [Tech Stack](#-tech-stack)
+- [Premium Features](#-premium-features)
+- [Getting Started (Web)](#-getting-started)
+- [Mobile App](#-mobile-app)
+- [Keyboard Shortcuts](#-keyboard-shortcuts-cheatsheet)
 
 ---
 
 ## 🏗️ System Architecture
 
-The following diagram illustrates how the frontend next-client interacts with the NestJS API server and SQLite database:
+The following diagram illustrates how the web client, mobile app, and CI pipeline all interact with the single NestJS API and SQLite database:
 
 ```mermaid
 graph TD
@@ -14,12 +31,20 @@ graph TD
     classDef default fill:#121216,stroke:#22c55e,stroke-width:1px,color:#fff;
     classDef primary fill:#1c3d27,stroke:#22c55e,stroke-width:2px,color:#fff;
     classDef database fill:#1a1a24,stroke:#3b82f6,stroke-width:2px,color:#fff;
+    classDef mobile fill:#1a2332,stroke:#3b82f6,stroke-width:2px,color:#fff;
+    classDef ci fill:#2a1f0d,stroke:#f59e0b,stroke-width:2px,color:#fff;
 
-    Client[Next.js Client App<br/>Port 3000]:::primary -->|1. REST Requests / API calls| API[NestJS Backend API<br/>Port 4000]:::primary
-    Client -->|4. Play Audio / Load Art| Static[Express Static Router<br/>/uploads]
-    
-    API -->|2. Queries & Updates| DB[(SQLite Database<br/>dev.db)]:::database
-    API -->|3. Read/Write Media| FS[Local Filesystem<br/>uploads/songs/<br/>uploads/covers/]
+    Client[Next.js Client App<br/>Port 3000]:::primary -->|REST / API calls| API[NestJS Backend API<br/>Port 4000]:::primary
+    Client -->|Play Audio / Load Art| Static[Express Static Router<br/>/uploads]
+
+    Mobile[Expo Mobile App<br/>Android / iOS]:::mobile -->|REST / API calls<br/>Bearer JWT| API
+    Mobile -->|Cache songs locally| Cache[(On-device Cache<br/>expo-file-system)]:::mobile
+
+    API -->|Queries & Updates| DB[(SQLite Database<br/>dev.db)]:::database
+    API -->|Read/Write Media| FS[Local Filesystem<br/>uploads/songs/<br/>uploads/covers/]
+
+    GHA[GitHub Actions<br/>build-apk.yml]:::ci -->|expo prebuild + gradlew| APK[Signed Release APK]:::ci
+    GHA -.->|triggered on push to main| Mobile
 ```
 
 ---
@@ -133,3 +158,41 @@ cd frontend
 npm run dev
 ```
 *Symphony client app starts listening at [http://localhost:3000](http://localhost:3000).*
+
+---
+
+## 📱 Mobile App
+
+A native Android/iOS client lives in [`mobile/`](mobile/), built with **Expo SDK 57** and **React Native 0.86**. It talks to the same backend as the web client and adds a few mobile-only features:
+
+```mermaid
+graph LR
+    Login[🔐 Login] --> Home[🏠 Home<br/>Recent • Trending • Playlists]
+    Home --> Radio[📻 Radio<br/>Shuffle-play the full library]
+    Home --> Import[⬆️ Import<br/>YouTube link → MP3]
+    Home --> Player[🎧 Full-Screen Player<br/>Seek • Shuffle • Repeat]
+    Player -.->|caches locally| Offline[(On-device MP3 cache)]
+```
+
+| Layer | Technology | Purpose |
+| :--- | :--- | :--- |
+| **Framework** | Expo SDK 57, React Native 0.86 | Native Android/iOS from one codebase |
+| **Audio Engine** | `expo-audio` | Streaming playback, background audio, lock-screen controls |
+| **Auth Storage** | `expo-secure-store` | Encrypted on-device JWT storage |
+| **Offline Cache** | `expo-file-system` (legacy API) | Caches played songs locally for instant replay |
+| **Icons** | `lucide-react-native` | Consistent iconography with the web client |
+
+### Building the APK
+
+Every push to `main` triggers [`.github/workflows/build-apk.yml`](.github/workflows/build-apk.yml), which runs `expo prebuild` + Gradle and uploads a signed release APK as a workflow artifact — no local Android Studio setup required. To build locally instead:
+
+```bash
+cd mobile
+npm install
+npx expo prebuild --platform android
+cd android && ./gradlew assembleRelease
+```
+
+The generated APK is at `mobile/android/app/build/outputs/apk/release/app-release.apk`.
+
+> ⚠️ **Expo SDK moves fast.** Before adding new native modules, check [`mobile/AGENTS.md`](mobile/AGENTS.md) and the versioned docs at `docs.expo.dev/versions/v57.0.0/` — APIs like `expo-av` and the old `expo-file-system` string-path API have already been removed/replaced once in this project's history.
